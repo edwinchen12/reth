@@ -10,9 +10,9 @@ repository.workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-db = { workspace = true, features = ["mdbx"] }
+reth-db = { workspace = true, features = ["redis", "mdbx"] }
 reth-db-api.workspace = true
-reth-provider.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-config.workspace = true
 reth-trie.workspace = true
 reth-etl.workspace = true

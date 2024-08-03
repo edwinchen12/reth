@@ -26,12 +26,18 @@ pub mod version;
 #[cfg(feature = "mdbx")]
 pub mod mdbx;
 
+#[cfg(feature = "redis")]
+pub mod redis;
+
 pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
 pub use tables::*;
 pub use utils::is_database_empty;
+//
+// #[cfg(feature = "mdbx")]
+// pub use mdbx::{create_db, init_db, open_db, open_db_read_only, DatabaseEnv, DatabaseEnvKind};
 
-#[cfg(feature = "mdbx")]
-pub use mdbx::{create_db, init_db, open_db, open_db_read_only, DatabaseEnv, DatabaseEnvKind};
+#[cfg(feature = "redis")]
+pub use redis::{create_db, init_db, open_db, open_db_read_only, DatabaseEnv, DatabaseKind};
 
 pub use reth_db_api::*;
 
@@ -39,7 +45,7 @@ pub use reth_db_api::*;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use crate::mdbx::DatabaseArguments;
+    use crate::implementation::redis::DatabaseArguments;
     use reth_db_api::{
         database::Database,
         database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
@@ -52,6 +58,9 @@ pub mod test_utils {
         sync::Arc,
     };
     use tempfile::TempDir;
+    use testcontainers::{Container, GenericImage};
+    use testcontainers::core::{IntoContainerPort, WaitFor};
+    use testcontainers::runners::SyncRunner;
 
     /// Error during database open
     pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
@@ -67,6 +76,7 @@ pub mod test_utils {
     /// A database will delete the db dir when dropped.
     #[derive(Debug)]
     pub struct TempDatabase<DB> {
+        redis: Container<GenericImage>,
         db: Option<DB>,
         path: PathBuf,
     }
@@ -134,55 +144,78 @@ pub mod test_utils {
         builder.expect(ERROR_TEMPDIR).into_path()
     }
 
+    pub fn get_redis_url(container: &Container<GenericImage>) -> String {
+        let port = container.get_host_port_ipv4(6379.tcp()).unwrap();
+
+        let connection_info = format!("redis://localhost:{}", port);
+        connection_info
+    }
+
+    pub fn start_redis() -> Container<GenericImage> {
+        let image = GenericImage::new("redis", "latest")
+            .with_exposed_port(6379.tcp())
+            .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"));
+        let container = SyncRunner::start(image).expect("Redis started");
+        container
+    }
+
     /// Create read/write database for testing
     pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let path = tempdir_path();
         let emsg = format!("{ERROR_DB_CREATION}: {path:?}");
+        let container = start_redis();
+        let redis_url = get_redis_url(&container);
 
         let db = init_db(
+            &redis_url,
             &path,
             DatabaseArguments::new(ClientVersion::default())
                 .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
         )
         .expect(&emsg);
 
-        Arc::new(TempDatabase { db: Some(db), path })
+        Arc::new(TempDatabase {redis: container, db: Some(db), path })
     }
 
     /// Create read/write database for testing
     pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<TempDatabase<DatabaseEnv>> {
+
+        let image = GenericImage::new("redis", "latest")
+            .with_exposed_port(6379.tcp())
+            .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"));
+        let container = start_redis();
+        let redis_url = get_redis_url(&container);
+
         let path = path.as_ref().to_path_buf();
         let db = init_db(
+            &redis_url,
             path.as_path(),
             DatabaseArguments::new(ClientVersion::default())
                 .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
         )
         .expect(ERROR_DB_CREATION);
-        Arc::new(TempDatabase { db: Some(db), path })
+        Arc::new(TempDatabase {redis: container, db: Some(db), path })
     }
 
     /// Create read only database for testing
     pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let args = DatabaseArguments::new(ClientVersion::default())
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
+        let container = start_redis();
+        let redis_url = get_redis_url(&container);
 
         let path = tempdir_path();
         {
-            init_db(path.as_path(), args.clone()).expect(ERROR_DB_CREATION);
+            init_db(&redis_url, path.as_path(), args.clone()).expect(ERROR_DB_CREATION);
         }
-        let db = open_db_read_only(path.as_path(), args).expect(ERROR_DB_OPEN);
-        Arc::new(TempDatabase { db: Some(db), path })
+        let db = open_db_read_only(&redis_url, path.as_path(), args).expect(ERROR_DB_OPEN);
+        Arc::new(TempDatabase {redis: container, db: Some(db), path })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        init_db,
-        mdbx::DatabaseArguments,
-        open_db, tables,
-        version::{db_version_file_path, DatabaseVersionError},
-    };
+    use crate::{init_db, redis::DatabaseArguments, open_db, tables, version::{db_version_file_path, DatabaseVersionError}, test_utils};
     use assert_matches::assert_matches;
     use reth_db_api::{
         cursor::DbCursorRO, database::Database, models::ClientVersion, transaction::DbTx,
@@ -194,19 +227,21 @@ mod tests {
     #[test]
     fn db_version() {
         let path = tempdir().unwrap();
+        let container = test_utils::start_redis();
+        let redis_url = test_utils::get_redis_url(&container);
 
         let args = DatabaseArguments::new(ClientVersion::default())
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
 
         // Database is empty
         {
-            let db = init_db(&path, args.clone());
+            let db = init_db(&redis_url, &path, args.clone());
             assert_matches!(db, Ok(_));
         }
 
         // Database is not empty, current version is the same as in the file
         {
-            let db = init_db(&path, args.clone());
+            let db = init_db(&redis_url, &path, args.clone());
             assert_matches!(db, Ok(_));
         }
 
@@ -214,7 +249,7 @@ mod tests {
         {
             reth_fs_util::write(path.path().join(db_version_file_path(&path)), "invalid-version")
                 .unwrap();
-            let db = init_db(&path, args.clone());
+            let db = init_db(&redis_url, &path, args.clone());
             assert!(db.is_err());
             assert_matches!(
                 db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
@@ -225,7 +260,7 @@ mod tests {
         // Database is not empty, version file contains not matching version
         {
             reth_fs_util::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
-            let db = init_db(&path, args);
+            let db = init_db(&redis_url, &path, args);
             assert!(db.is_err());
             assert_matches!(
                 db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
@@ -237,10 +272,12 @@ mod tests {
     #[test]
     fn db_client_version() {
         let path = tempdir().unwrap();
+        let container = test_utils::start_redis();
+        let redis_url = test_utils::get_redis_url(&container);
 
         // Empty client version is not recorded
         {
-            let db = init_db(&path, DatabaseArguments::new(ClientVersion::default())).unwrap();
+            let db = init_db(&redis_url, &path, DatabaseArguments::new(ClientVersion::default())).unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_matches!(cursor.first(), Ok(None));
@@ -249,7 +286,7 @@ mod tests {
         // Client version is recorded
         let first_version = ClientVersion { version: String::from("v1"), ..Default::default() };
         {
-            let db = init_db(&path, DatabaseArguments::new(first_version.clone())).unwrap();
+            let db = init_db(&redis_url, &path, DatabaseArguments::new(first_version.clone())).unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(
@@ -265,7 +302,7 @@ mod tests {
 
         // Same client version is not duplicated.
         {
-            let db = init_db(&path, DatabaseArguments::new(first_version.clone())).unwrap();
+            let db = init_db(&redis_url, &path, DatabaseArguments::new(first_version.clone())).unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(
@@ -283,7 +320,7 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
         let second_version = ClientVersion { version: String::from("v2"), ..Default::default() };
         {
-            let db = init_db(&path, DatabaseArguments::new(second_version.clone())).unwrap();
+            let db = init_db(&redis_url, &path, DatabaseArguments::new(second_version.clone())).unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(
@@ -301,7 +338,7 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
         let third_version = ClientVersion { version: String::from("v3"), ..Default::default() };
         {
-            let db = open_db(path.path(), DatabaseArguments::new(third_version.clone())).unwrap();
+            let db = open_db(&redis_url, path.path(), DatabaseArguments::new(third_version.clone())).unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(

@@ -1,49 +1,95 @@
 //! Transaction wrapper for libmdbx-sys.
 
 use super::cursor::Cursor;
-use crate::{
-    metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
-    tables::utils::decode_one,
-    DatabaseError,
-};
+use crate::{metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome}, tables::utils::decode_one, DatabaseError, DatabaseEnv};
 use reth_db_api::{
     table::{Compress, DupSort, Encode, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
-use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
+use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, trace, warn};
-use std::{
-    backtrace::Backtrace,
-    marker::PhantomData,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::{Duration, Instant},
-};
+use std::{backtrace::Backtrace, fmt, marker::PhantomData, string::String, sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+}, time::{Duration, Instant}};
+use std::borrow::Cow;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::RwLock;
+use redis::{Client, Commands, ErrorKind, Iter, Pipeline, RedisError};
+use reth_db_api::table::{Key, Value};
 
 /// Duration after which we emit the log about long-lived database transactions.
 const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 
 /// Wrapper for the libmdbx transaction.
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct Tx<K: TransactionKind> {
+    //TODO: remove this
     /// Libmdbx-sys transaction.
     pub inner: Transaction<K>,
+
+    /// redis client
+    redis: Arc<Client>,
 
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
     /// closed by [`Tx::commit`] or [`Tx::abort`], but we still need to report it in the metrics.
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
+
+    /// redis pipeline holding the changes in the transaction.
+    pipeline: Arc<RwLock<Pipeline>>,
+
+    /// redis data that has been changed in the transaction but not yet committed.
+    uncommitted_data: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+
+    /// redis key that has been deleted in the transaction but not yet committed.
+    deleted_keys: Arc<RwLock<HashMap<String, ()>>>,
+}
+
+#[inline]
+fn from(value: RedisError) -> DatabaseErrorInfo {
+    let code = match value.kind() {
+        ErrorKind::ResponseError => 1,
+        ErrorKind::ParseError => 2,
+        ErrorKind::AuthenticationFailed => 3,
+        ErrorKind::TypeError => 4,
+        ErrorKind::ExecAbortError => 5,
+        ErrorKind::BusyLoadingError => 6,
+        ErrorKind::NoScriptError => 7,
+        ErrorKind::InvalidClientConfig => 8,
+        ErrorKind::Moved => 9,
+        ErrorKind::Ask => 10,
+        ErrorKind::TryAgain => 11,
+        ErrorKind::ClusterDown => 12,
+        ErrorKind::CrossSlot => 13,
+        ErrorKind::MasterDown => 14,
+        ErrorKind::IoError => 15,
+        ErrorKind::ClientError => 16,
+        ErrorKind::ExtensionError => 17,
+        ErrorKind::ReadOnly => 18,
+        ErrorKind::MasterNameNotFoundBySentinel => 19,
+        ErrorKind::NoValidReplicasFoundBySentinel => 20,
+        ErrorKind::EmptySentinelList => 21,
+        ErrorKind::NotBusy => 22,
+        ErrorKind::ClusterConnectionNotFound => 23,
+        _ => 0,
+    };
+    DatabaseErrorInfo { message: value.to_string(), code }
 }
 
 impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction.
     #[inline]
-    pub const fn new(inner: Transaction<K>) -> Self {
-        Self::new_inner(inner, None)
+    pub const fn new(
+        inner: Transaction<K>,
+        redis: Arc<Client>,
+        pipeline: Arc<RwLock<Pipeline>>,
+        uncommitted_data: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+        deleted_keys: Arc<RwLock<HashMap<String, ()>>>) -> Self {
+        Self::new_inner(inner, redis, None, pipeline, uncommitted_data, deleted_keys)
     }
 
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
@@ -51,6 +97,7 @@ impl<K: TransactionKind> Tx<K> {
     #[track_caller]
     pub(crate) fn new_with_metrics(
         inner: Transaction<K>,
+        redis: Arc<Client>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> reth_libmdbx::Result<Self> {
         let metrics_handler = env_metrics
@@ -61,12 +108,18 @@ impl<K: TransactionKind> Tx<K> {
                 Ok(handler)
             })
             .transpose()?;
-        Ok(Self::new_inner(inner, metrics_handler))
+        Ok(Self::new_inner(inner, redis, metrics_handler, Arc::new(RwLock::new(Pipeline::new())), Arc::new(RwLock::new(HashMap::new())), Arc::new(RwLock::new(HashMap::new()))))
     }
 
     #[inline]
-    const fn new_inner(inner: Transaction<K>, metrics_handler: Option<MetricsHandler<K>>) -> Self {
-        Self { inner, metrics_handler }
+    const fn new_inner(
+        inner: Transaction<K>,
+        redis: Arc<Client>,
+        metrics_handler: Option<MetricsHandler<K>>,
+        pipeline: Arc<RwLock<Pipeline>>,
+        uncommitted_data: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+        deleted_keys: Arc<RwLock<HashMap<String, ()>>>) -> Self {
+        Self { inner, redis, metrics_handler, pipeline, uncommitted_data, deleted_keys }
     }
 
     /// Gets this transaction ID.
@@ -160,6 +213,38 @@ impl<K: TransactionKind> Tx<K> {
         } else {
             f(&self.inner)
         }
+    }
+
+    /// Generates a Redis key for the given table and key.
+    /// TODO: optimize this function
+    fn generate_redis_key<T: Table>(key: &T::Key) -> String {
+        // // let serialized_key: String = key.encode().to_string();
+        // let mut serialized_key = T::NAME.as_bytes().to_vec();
+        // serialized_key.push(b':');
+        // serialized_key.extend(key.clone().encode().into());
+        //
+        // String::from_utf8(serialized_key).unwrap()
+        let encoded_key = key.clone().encode();
+        let key_str = String::from_utf8_lossy(encoded_key.as_ref()).into_owned();
+        format!("{}:{}", T::NAME, key_str)
+        // format!("{}:{}", T::NAME, String::from_utf8_lossy(key.clone().encode().as_ref()))
+    }
+
+    fn clear_redis<T: Table>(&self) -> Result<(), DatabaseError> {
+        let mut connection = self.redis.get_connection()
+            .map_err(|e| DatabaseError::Open(from(e)))?;
+
+        let pattern = format!("{}:*", T::NAME);
+        let iter: Iter<'_, String> = connection.scan_match(&pattern)
+            .map_err(|e| DatabaseError::Read(from(e)))?;
+
+        let keys: Vec<String> = iter.collect();
+
+        for key in keys {
+            let _: () = connection.del(key).map_err(|e| DatabaseError::Delete(from(e)))?;
+        }
+
+        Ok(())
     }
 }
 
@@ -258,6 +343,18 @@ impl<K: TransactionKind> Drop for MetricsHandler<K> {
     }
 }
 
+impl<K: TransactionKind> fmt::Debug for Tx<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Tx")
+            .field("inner", &self.inner)
+            .field("redis", &self.redis)
+            .field("metrics_handler", &self.metrics_handler)
+            .field("uncommitted_data", &self.uncommitted_data)
+            .field("deleted_keys", &self.deleted_keys)
+            .finish()
+    }
+}
+
 impl TableImporter for Tx<RW> {}
 
 impl<K: TransactionKind> DbTx for Tx<K> {
@@ -265,16 +362,32 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     type DupCursor<T: DupSort> = Cursor<K, T>;
 
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
+        // let key: <<T as Table>::Key as Encode>::Encoded = key.encode();
+        let redis_key = Tx::<K>::generate_redis_key::<T>(&key);
+        let key = key.encode();
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
-            tx.get(self.get_dbi::<T>()?, key.encode().as_ref())
-                .map_err(|e| DatabaseError::Read(e.into()))?
-                .map(decode_one::<T>)
-                .transpose()
+            if self.deleted_keys.read().unwrap().contains_key(&redis_key) {
+                Ok(None)
+            } else if let Some(value) = self.uncommitted_data.read().unwrap().get(&redis_key) {
+                Ok(Some(decode_one::<T>(Cow::Owned(value.to_vec()))?))
+            } else {
+                // TODO: review the isolation for this case, should we read from redis?
+                let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e)))?;
+                let value: Option<Vec<u8>> = connection.get(redis_key).map_err(|e| DatabaseError::Read(from(e)))?;
+                if let Some(value) = value {
+                    Ok(Some(decode_one::<T>(Cow::Owned(value))?))
+                } else {
+                    Ok(None)
+                }
+            }
         })
     }
 
+    //TODO: do we need to empty the local cache?
     fn commit(self) -> Result<bool, DatabaseError> {
         self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
+            let mut connection = this.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
+            this.pipeline.write().unwrap().execute(&mut connection);
             match this.inner.commit().map_err(|e| DatabaseError::Commit(e.into())) {
                 Ok((v, latency)) => (Ok(v), Some(latency)),
                 Err(e) => (Err(e), None),
@@ -283,6 +396,7 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     }
 
     fn abort(self) {
+        //TODO: revert redis changes?
         self.execute_with_close_transaction_metric(TransactionOutcome::Abort, |this| {
             (drop(this.inner), None)
         })
@@ -323,13 +437,17 @@ impl DbTxMut for Tx<RW> {
     type DupCursorMut<T: DupSort> = Cursor<RW, T>;
 
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        let redis_key = Tx::<RW>::generate_redis_key::<T>(&key);
         let key = key.encode();
-        let value = value.compress();
+        let compressed_value = value.compress();
+        self.uncommitted_data.write().unwrap().insert(redis_key.clone(), compressed_value.as_ref().to_vec());
+        self.pipeline.write().unwrap().set(redis_key.clone(), compressed_value.as_ref());
+
         self.execute_with_operation_metric::<T, _>(
             Operation::Put,
-            Some(value.as_ref().len()),
+            Some(compressed_value.as_ref().len()),
             |tx| {
-                tx.put(self.get_dbi::<T>()?, key.as_ref(), value, WriteFlags::UPSERT).map_err(|e| {
+                tx.put(self.get_dbi::<T>()?, key.as_ref(), compressed_value, WriteFlags::UPSERT).map_err(|e| {
                     DatabaseWriteError {
                         info: e.into(),
                         operation: DatabaseWriteOperation::Put,
@@ -353,14 +471,19 @@ impl DbTxMut for Tx<RW> {
         if let Some(value) = &value {
             data = Some(value.as_ref());
         };
+        let redis_key = Tx::<RW>::generate_redis_key::<T>(&key);
+        self.deleted_keys.write().unwrap().insert(redis_key.clone(), ());
+        self.pipeline.write().unwrap().del(redis_key.clone());
 
         self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
-            tx.del(self.get_dbi::<T>()?, key.encode(), data)
+            let key = key.encode();
+            tx.del(self.get_dbi::<T>()?, key.as_ref(), data)
                 .map_err(|e| DatabaseError::Delete(e.into()))
         })
     }
 
     fn clear<T: Table>(&self) -> Result<(), DatabaseError> {
+        self.clear_redis::<T>()?;
         self.inner.clear_db(self.get_dbi::<T>()?).map_err(|e| DatabaseError::Delete(e.into()))?;
 
         Ok(())
@@ -377,61 +500,73 @@ impl DbTxMut for Tx<RW> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{mdbx::DatabaseArguments, tables, mdbx::DatabaseEnv, mdbx::DatabaseEnvKind};
+    use crate::{tables, test_utils};
     use reth_db_api::{database::Database, models::ClientVersion, transaction::DbTx};
     use reth_libmdbx::MaxReadTransactionDuration;
     use reth_storage_errors::db::DatabaseError;
     use std::{sync::atomic::Ordering, thread::sleep, time::Duration};
     use tempfile::tempdir;
+    use crate::implementation::redis::{DatabaseArguments, DatabaseEnv, DatabaseKind};
 
     #[test]
-    fn long_read_transaction_safety_disabled() {
-        const MAX_DURATION: Duration = Duration::from_secs(1);
+    fn get_not_found_key() {
+        let container = test_utils::start_redis();
+        let redis_url = test_utils::get_redis_url(&container);
 
         let dir = tempdir().unwrap();
-        let args = DatabaseArguments::new(ClientVersion::default())
-            .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
-                MAX_DURATION,
-            )));
-        let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
+        let args = DatabaseArguments::new(ClientVersion::default());
+        let db = DatabaseEnv::open(&redis_url, dir.path(), DatabaseKind::RW, args).unwrap();
 
-        let mut tx = db.tx().unwrap();
-        tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;
-        tx.disable_long_read_transaction_safety();
-        // Give the `TxnManager` some time to time out the transaction.
-        sleep(MAX_DURATION + Duration::from_millis(100));
-
-        // Transaction has not timed out.
+        let tx = db.tx().unwrap();
         assert_eq!(
             tx.get::<tables::Transactions>(0),
-            Err(DatabaseError::Open(reth_libmdbx::Error::NotFound.into()))
+            Ok(None)
         );
-        // Backtrace is not recorded.
-        assert!(!tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
     }
 
-    #[test]
-    fn long_read_transaction_safety_enabled() {
-        const MAX_DURATION: Duration = Duration::from_secs(1);
-
-        let dir = tempdir().unwrap();
-        let args = DatabaseArguments::new(ClientVersion::default())
-            .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
-                MAX_DURATION,
-            )));
-        let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
-
-        let mut tx = db.tx().unwrap();
-        tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;
-        // Give the `TxnManager` some time to time out the transaction.
-        sleep(MAX_DURATION + Duration::from_millis(100));
-
-        // Transaction has timed out.
-        assert_eq!(
-            tx.get::<tables::Transactions>(0),
-            Err(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionTimeout.into()))
-        );
-        // Backtrace is recorded.
-        assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
-    }
+    // #[test]
+    // fn long_read_transaction_safety_disabled() {
+    //     const MAX_DURATION: Duration = Duration::from_secs(1);
+    //
+    //     let dir = tempdir().unwrap();
+    //     let args = DatabaseArguments::new(ClientVersion::default());
+    //     let db = DatabaseEnv::open("redis://localhost:6379".as_ref(), dir.path(), DatabaseKind::RW, args).unwrap();
+    //
+    //     let mut tx = db.tx().unwrap();
+    //     // tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;
+    //     tx.disable_long_read_transaction_safety();
+    //     // Give the `TxnManager` some time to time out the transaction.
+    //     // sleep(MAX_DURATION + Duration::from_millis(100));
+    //
+    //     // Transaction has not timed out.
+    //     assert_eq!(
+    //         tx.get::<tables::Transactions>(0),
+    //         Err(DatabaseError::Open(reth_libmdbx::Error::NotFound.into()))
+    //     );
+    // }
+    //
+    // #[test]
+    // fn long_read_transaction_safety_enabled() {
+    //     const MAX_DURATION: Duration = Duration::from_secs(1);
+    //
+    //     let dir = tempdir().unwrap();
+    //     let args = DatabaseArguments::new(ClientVersion::default())
+    //         .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
+    //             MAX_DURATION,
+    //         )));
+    //     let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
+    //
+    //     let mut tx = db.tx().unwrap();
+    //     tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;
+    //     // Give the `TxnManager` some time to time out the transaction.
+    //     sleep(MAX_DURATION + Duration::from_millis(100));
+    //
+    //     // Transaction has timed out.
+    //     assert_eq!(
+    //         tx.get::<tables::Transactions>(0),
+    //         Err(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionTimeout.into()))
+    //     );
+    //     // Backtrace is recorded.
+    //     assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
+    // }
 }

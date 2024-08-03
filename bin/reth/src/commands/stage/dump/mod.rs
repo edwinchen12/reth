@@ -8,7 +8,7 @@ use crate::{
 
 use crate::args::DatadirArgs;
 use clap::Parser;
-use reth_db::{init_db, mdbx::DatabaseArguments, tables, DatabaseEnv};
+use reth_db::{init_db, redis::DatabaseArguments, tables, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, models::ClientVersion, table::TableImporter,
     transaction::DbTx,
@@ -108,7 +108,9 @@ pub(crate) fn setup<DB: Database>(
 
     info!(target: "reth::cli", ?output_db, "Creating separate db");
 
-    let output_datadir = init_db(output_db, DatabaseArguments::new(ClientVersion::default()))?;
+    //TODO: read from config
+    let redis_url = "redis://localhost:6379".to_string();
+    let output_datadir = init_db(&redis_url, output_db, DatabaseArguments::new(ClientVersion::default()))?;
 
     output_datadir.update(|tx| {
         tx.import_table_with_range::<tables::BlockBodyIndices, _>(

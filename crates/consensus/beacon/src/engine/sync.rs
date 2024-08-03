@@ -428,7 +428,7 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use futures::poll;
-    use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
+    use reth_db::{DatabaseEnv, test_utils::TempDatabase};
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,

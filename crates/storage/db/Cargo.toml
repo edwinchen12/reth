@@ -46,6 +46,18 @@ sysinfo = "0.30"
 # arbitrary utils
 strum = { workspace = true, features = ["derive"] }
 
+# redis-rs
+#r2d2 = { version = "0.8.8" }
+redis = { version = "0.25" }
+lazy_static = "1.5.0"
+#r2d2_redis = { version = "0.15" }
+#TODO: move to dev-dependencies
+testcontainers = {  version = "0.20.1", features = ["blocking"] }
+
+# postgres
+tokio-postgres = { version = "0.7.2" }
+tokio = { version = "1.0", features = ["full"] }
+
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
@@ -64,6 +76,7 @@ criterion.workspace = true
 iai-callgrind = "0.10.2"
 
 arbitrary = { workspace = true, features = ["derive"] }
+
 proptest.workspace = true
 
 paste.workspace = true
@@ -71,12 +84,13 @@ paste.workspace = true
 assert_matches.workspace = true
 
 [features]
-default = ["mdbx"]
+default = ["redis"]
 test-utils = ["tempfile", "arbitrary"]
 mdbx = ["reth-libmdbx"]
 bench = []
 arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
 optimism = []
+redis = ["reth-libmdbx"]
 
 [[bench]]
 name = "hash_keys"

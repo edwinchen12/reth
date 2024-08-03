@@ -173,9 +173,11 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
 
         let data_dir = node_config.datadir();
         let db_path = data_dir.db();
+        //TODO: read from config
+        let redis_url = "redis://localhost:6379".to_string();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics());
+        let database = Arc::new(init_db(&redis_url, db_path.clone(), self.db.database_args())?.with_metrics());
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();

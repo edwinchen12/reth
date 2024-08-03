@@ -51,6 +51,8 @@ impl EnvironmentArgs {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
+        //TODO: read from config
+        let redis_url = "redis://localhost:6379".to_string();
 
         if access.is_read_write() {
             reth_fs_util::create_dir_all(&db_path)?;
@@ -68,11 +70,11 @@ impl EnvironmentArgs {
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
         let (db, sfp) = match access {
             AccessRights::RW => (
-                Arc::new(init_db(db_path, self.db.database_args())?),
+                Arc::new(init_db(&redis_url, db_path, self.db.database_args())?),
                 StaticFileProvider::read_write(sf_path)?,
             ),
             AccessRights::RO => (
-                Arc::new(open_db_read_only(&db_path, self.db.database_args())?),
+                Arc::new(open_db_read_only(&redis_url, &db_path, self.db.database_args())?),
                 StaticFileProvider::read_only(sf_path)?,
             ),
         };

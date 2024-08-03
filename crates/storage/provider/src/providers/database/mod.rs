@@ -8,7 +8,7 @@ use crate::{
     StateProviderBox, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
     WithdrawalsProvider,
 };
-use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db::{init_db, redis::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
@@ -79,13 +79,14 @@ impl ProviderFactory<DatabaseEnv> {
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
     pub fn new_with_database_path<P: AsRef<Path>>(
+        redis_url: &String,
         path: P,
         chain_spec: Arc<ChainSpec>,
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider,
     ) -> RethResult<Self> {
         Ok(Self {
-            db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
+            db: Arc::new(init_db(redis_url, path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
         })
@@ -592,7 +593,8 @@ mod tests {
     use assert_matches::assert_matches;
     use rand::Rng;
     use reth_db::{
-        mdbx::DatabaseArguments,
+        // mdbx::DatabaseArguments,
+        redis::DatabaseArguments,
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
@@ -607,6 +609,7 @@ mod tests {
     };
     use std::{ops::RangeInclusive, sync::Arc};
     use tokio::sync::watch;
+    use reth_db::test_utils::{get_redis_url, start_redis};
 
     #[test]
     fn common_history_provider() {
@@ -638,7 +641,11 @@ mod tests {
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
+        let container = start_redis();
+        let redis_url = get_redis_url(&container);
+
         let factory = ProviderFactory::new_with_database_path(
+            &redis_url,
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
@@ -673,6 +680,7 @@ mod tests {
             assert_matches!(provider.transaction_id(block.body[0].hash), Ok(Some(0)));
         }
 
+        //TODO: this failing due to uncommitted transactions
         {
             let provider = factory.provider_rw().unwrap();
             assert_matches!(

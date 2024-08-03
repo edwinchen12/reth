@@ -55,7 +55,9 @@ impl Command {
         warn!("Make sure the node is not running when running `reth db diff`!");
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
-        let second_db = open_db_read_only(&second_db_path, self.second_db.database_args())?;
+        //TODO: read from config
+        let redis_url = "redis://localhost:6379".to_string();
+        let second_db = open_db_read_only(&redis_url, &second_db_path, self.second_db.database_args())?;
 
         let tables = match &self.table {
             Some(table) => std::slice::from_ref(table),

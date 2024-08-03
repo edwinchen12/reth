@@ -20,7 +20,7 @@ use reth::{
     },
     utils::db::open_db_read_only,
 };
-use reth_db::mdbx::DatabaseArguments;
+use reth_db::redis::DatabaseArguments;
 use reth_db_api::models::ClientVersion;
 
 // Bringing up the RPC
@@ -44,7 +44,10 @@ async fn main() -> eyre::Result<()> {
     // 1. Setup the DB
     let db_path = std::env::var("RETH_DB_PATH")?;
     let db_path = Path::new(&db_path);
+    //TODO: read from config
+    let redis_url = "redis://localhost:6379".to_string();
     let db = Arc::new(open_db_read_only(
+        &redis_url,
         db_path.join("db").as_path(),
         DatabaseArguments::new(ClientVersion::default()),
     )?);

@@ -43,7 +43,8 @@ mod tests {
     use crate::test_utils::{StorageKind, TestStageDB};
     use alloy_rlp::Decodable;
     use reth_db::{
-        mdbx::{cursor::Cursor, RW},
+        redis::cursor::Cursor,
+        mdbx::RW,
         tables,
         test_utils::TempDatabase,
         AccountsHistory, DatabaseEnv,

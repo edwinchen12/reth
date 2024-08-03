@@ -80,7 +80,9 @@ impl Command {
     /// Execute `p2p` command
     pub async fn execute(&self) -> eyre::Result<()> {
         let tempdir = tempfile::TempDir::new()?;
-        let noop_db = Arc::new(create_db(tempdir.into_path(), self.db.database_args())?);
+        //TODO: read from config
+        let redis_url = "redis://localhost:6379".to_string();
+        let noop_db = Arc::new(create_db(&redis_url, tempdir.into_path(), self.db.database_args())?);
 
         // add network name to data dir
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
