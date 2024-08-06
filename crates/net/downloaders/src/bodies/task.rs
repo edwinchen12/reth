@@ -179,7 +179,7 @@ mod tests {
     async fn download_one_by_one_on_task() {
         reth_tracing::init_test_tracing();
 
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
         let (headers, mut bodies) = generate_bodies(0..=19);
 
         insert_headers(factory.db_ref().db(), &headers);
@@ -207,7 +207,7 @@ mod tests {
     #[allow(clippy::reversed_empty_ranges)]
     async fn set_download_range_error_returned() {
         reth_tracing::init_test_tracing();
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
 
         let downloader = BodiesDownloaderBuilder::default().build(
             Arc::new(TestBodiesClient::default()),

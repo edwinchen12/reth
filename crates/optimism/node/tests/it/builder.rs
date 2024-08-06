@@ -5,11 +5,11 @@ use reth_node_api::FullNodeComponents;
 use reth_node_builder::{NodeBuilder, NodeConfig};
 use reth_node_optimism::node::OptimismNode;
 
-#[test]
-fn test_basic_setup() {
+#[tokio::test]
+async fn test_basic_setup() {
     // parse CLI -> config
     let config = NodeConfig::test();
-    let db = create_test_rw_db();
+    let db = create_test_rw_db().await;
     let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types::<OptimismNode>()

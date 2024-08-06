@@ -237,12 +237,12 @@ impl TestConsensusEngineBuilder {
     }
 
     /// Builds the test consensus engine into a `TestConsensusEngine` and `TestEnv`.
-    pub fn build(
+    pub async fn build(
         self,
     ) -> (TestBeaconConsensusEngine<NoopFullBlockClient>, TestEnv<Arc<DatabaseEnv>>) {
         let networked = NetworkedTestConsensusEngineBuilder { base_config: self, client: None };
 
-        networked.build()
+        networked.build().await
     }
 }
 
@@ -319,10 +319,10 @@ where
     }
 
     /// Builds the test consensus engine into a `TestConsensusEngine` and `TestEnv`.
-    pub fn build(self) -> (TestBeaconConsensusEngine<Client>, TestEnv<Arc<DatabaseEnv>>) {
+    pub async fn build(self) -> (TestBeaconConsensusEngine<Client>, TestEnv<Arc<DatabaseEnv>>) {
         reth_tracing::init_test_tracing();
         let provider_factory =
-            create_test_provider_factory_with_chain_spec(self.base_config.chain_spec.clone());
+            create_test_provider_factory_with_chain_spec(self.base_config.chain_spec.clone()).await;
 
         let consensus: Arc<dyn Consensus> = match self.base_config.consensus {
             TestConsensusConfig::Real => {

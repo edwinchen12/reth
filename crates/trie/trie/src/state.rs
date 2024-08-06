@@ -416,8 +416,8 @@ mod tests {
         assert_eq!(account_storage.map(|st| st.wiped), Some(true));
     }
 
-    #[test]
-    fn from_bundle_state_with_rayon() {
+    #[tokio::test]
+    async fn from_bundle_state_with_rayon() {
         let address1 = Address::with_last_byte(1);
         let address2 = Address::with_last_byte(2);
         let slot1 = U256::from(1015);
@@ -438,7 +438,7 @@ mod tests {
         assert_eq!(post_state.accounts.len(), 2);
         assert_eq!(post_state.storages.len(), 2);
 
-        let db = create_test_rw_db();
+        let db = create_test_rw_db().await;
         let tx = db.tx().expect("failed to create transaction");
         assert_eq!(
             post_state.state_root(&tx).unwrap(),

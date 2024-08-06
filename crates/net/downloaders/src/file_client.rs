@@ -494,7 +494,7 @@ mod tests {
     #[tokio::test]
     async fn streams_bodies_from_buffer() {
         // Generate some random blocks
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
         let (headers, mut bodies) = generate_bodies(0..=19);
 
         insert_headers(factory.db_ref().db(), &headers);
@@ -577,7 +577,7 @@ mod tests {
     #[tokio::test]
     async fn test_download_bodies_from_file() {
         // Generate some random blocks
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
         let (file, headers, mut bodies) = generate_bodies_file(0..=19).await;
 
         // now try to read them back

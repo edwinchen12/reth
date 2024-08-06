@@ -5,6 +5,7 @@ use std::{
     fmt::Debug,
     path::{Path, PathBuf},
 };
+use futures::stream::{self, StreamExt};
 
 /// A single test case, capable of loading a JSON description of itself and running it.
 ///
@@ -21,7 +22,7 @@ pub trait Case: Debug + Sync + Sized {
     fn load(path: &Path) -> Result<Self, Error>;
 
     /// Run the test.
-    fn run(&self) -> Result<(), Error>;
+    async fn run(&self) -> Result<(), Error>;
 }
 
 /// A container for multiple test cases.
@@ -33,7 +34,10 @@ pub struct Cases<T> {
 
 impl<T: Case> Cases<T> {
     /// Run the contained test cases.
-    pub fn run(&self) -> Vec<CaseResult> {
-        self.test_cases.iter().map(|(path, case)| CaseResult::new(path, case, case.run())).collect()
+    pub async fn run(&self) -> Vec<CaseResult> {
+        stream::iter(&self.test_cases)
+            .then(|(path, case)| async move { CaseResult::new(path, case, case.run().await) })
+            .collect()
+            .await
     }
 }

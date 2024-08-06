@@ -93,9 +93,9 @@ mod tests {
     };
     use std::collections::{BTreeMap, HashMap};
 
-    #[test]
-    fn write_to_db_account_info() {
-        let factory = create_test_provider_factory();
+    #[tokio::test]
+    async fn write_to_db_account_info() {
+        let factory = create_test_provider_factory().await;
         let provider = factory.provider_rw().unwrap();
 
         let address_a = Address::ZERO;
@@ -231,9 +231,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn write_to_db_storage() {
-        let factory = create_test_provider_factory();
+    #[tokio::test]
+    async fn write_to_db_storage() {
+        let factory = create_test_provider_factory().await;
         let provider = factory.provider_rw().unwrap();
 
         let address_a = Address::ZERO;
@@ -419,9 +419,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn write_to_db_multiple_selfdestructs() {
-        let factory = create_test_provider_factory();
+    #[tokio::test]
+    async fn write_to_db_multiple_selfdestructs() {
+        let factory = create_test_provider_factory().await;
         let provider = factory.provider_rw().unwrap();
 
         let address1 = Address::random();
@@ -724,9 +724,9 @@ mod tests {
         assert_eq!(storage_changes.next(), None);
     }
 
-    #[test]
-    fn storage_change_after_selfdestruct_within_block() {
-        let factory = create_test_provider_factory();
+    #[tokio::test]
+    async fn storage_change_after_selfdestruct_within_block() {
+        let factory = create_test_provider_factory().await;
         let provider = factory.provider_rw().unwrap();
 
         let address1 = Address::random();
@@ -857,8 +857,8 @@ mod tests {
         assert_eq!(this.receipts.len(), 7);
     }
 
-    #[test]
-    fn bundle_state_state_root() {
+    #[tokio::test]
+    async fn bundle_state_state_root() {
         type PreState = BTreeMap<Address, (Account, BTreeMap<B256, U256>)>;
         let mut prestate: PreState = (0..10)
             .map(|key| {
@@ -869,7 +869,7 @@ mod tests {
             })
             .collect();
 
-        let db = create_test_rw_db();
+        let db = create_test_rw_db().await;
 
         // insert initial state to the database
         db.update(|tx| {

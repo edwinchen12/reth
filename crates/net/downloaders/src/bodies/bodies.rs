@@ -616,7 +616,7 @@ mod tests {
     #[tokio::test]
     async fn streams_bodies_in_order() {
         // Generate some random blocks
-        let db = create_test_rw_db();
+        let db = create_test_rw_db().await;
         let (headers, mut bodies) = generate_bodies(0..=19);
 
         insert_headers(db.db(), &headers);
@@ -649,7 +649,7 @@ mod tests {
     #[tokio::test]
     async fn requests_correct_number_of_times() {
         // Generate some random blocks
-        let db = create_test_rw_db();
+        let db = create_test_rw_db().await;
         let mut rng = generators::rng();
         let blocks = random_block_range(&mut rng, 0..=199, B256::ZERO, 1..2);
 
@@ -696,7 +696,7 @@ mod tests {
     #[tokio::test]
     async fn streams_bodies_in_order_after_range_reset() {
         // Generate some random blocks
-        let db = create_test_rw_db();
+        let db = create_test_rw_db().await;
         let (headers, mut bodies) = generate_bodies(0..=99);
 
         insert_headers(db.db(), &headers);
@@ -738,7 +738,7 @@ mod tests {
     #[tokio::test]
     async fn can_download_new_range_after_termination() {
         // Generate some random blocks
-        let db = create_test_rw_db();
+        let db = create_test_rw_db().await;
         let (headers, mut bodies) = generate_bodies(0..=199);
 
         insert_headers(db.db(), &headers);
@@ -778,7 +778,7 @@ mod tests {
     #[tokio::test]
     async fn can_download_after_exceeding_limit() {
         // Generate some random blocks
-        let db = create_test_rw_db();
+        let db = create_test_rw_db().await;
         let (headers, mut bodies) = generate_bodies(0..=199);
 
         insert_headers(db.db(), &headers);
@@ -815,7 +815,7 @@ mod tests {
     #[tokio::test]
     async fn can_tolerate_empty_responses() {
         // Generate some random blocks
-        let db = create_test_rw_db();
+        let db = create_test_rw_db().await;
         let (headers, mut bodies) = generate_bodies(0..=99);
 
         insert_headers(db.db(), &headers);

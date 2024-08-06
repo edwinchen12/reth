@@ -337,9 +337,9 @@ mod tests {
     use reth_primitives::MAINNET;
     use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 
-    #[test]
-    fn is_pruning_needed() {
-        let db = create_test_rw_db();
+    #[tokio::test]
+    async fn is_pruning_needed() {
+        let db = create_test_rw_db().await;
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
         let provider_factory = ProviderFactory::new(
             db,

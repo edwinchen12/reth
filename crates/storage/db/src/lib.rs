@@ -58,9 +58,10 @@ pub mod test_utils {
         sync::Arc,
     };
     use tempfile::TempDir;
-    use testcontainers::{Container, GenericImage};
+    use testcontainers::{Container, ContainerAsync, GenericImage};
     use testcontainers::core::{IntoContainerPort, WaitFor};
-    use testcontainers::runners::SyncRunner;
+    use testcontainers::runners::{AsyncRunner};
+    use testcontainers_modules::redis::Redis;
 
     /// Error during database open
     pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
@@ -76,7 +77,7 @@ pub mod test_utils {
     /// A database will delete the db dir when dropped.
     #[derive(Debug)]
     pub struct TempDatabase<DB> {
-        redis: Container<GenericImage>,
+        redis: ContainerAsync<Redis>,
         db: Option<DB>,
         path: PathBuf,
     }
@@ -144,27 +145,23 @@ pub mod test_utils {
         builder.expect(ERROR_TEMPDIR).into_path()
     }
 
-    pub fn get_redis_url(container: &Container<GenericImage>) -> String {
-        let port = container.get_host_port_ipv4(6379.tcp()).unwrap();
+    pub async fn get_redis_url(container: &ContainerAsync<Redis>) -> String {
+        let host_ip = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(6379.tcp()).await.unwrap();
 
-        let connection_info = format!("redis://localhost:{}", port);
-        connection_info
+        format!("redis://{}:{}", host_ip, port)
     }
 
-    pub fn start_redis() -> Container<GenericImage> {
-        let image = GenericImage::new("redis", "latest")
-            .with_exposed_port(6379.tcp())
-            .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"));
-        let container = SyncRunner::start(image).expect("Redis started");
-        container
+    pub async fn get_redis_container() -> ContainerAsync<Redis> {
+        Redis::default().start().await.unwrap()
     }
 
     /// Create read/write database for testing
-    pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
+    pub async fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let path = tempdir_path();
         let emsg = format!("{ERROR_DB_CREATION}: {path:?}");
-        let container = start_redis();
-        let redis_url = get_redis_url(&container);
+        let container = get_redis_container().await;
+        let redis_url = get_redis_url(&container).await;
 
         let db = init_db(
             &redis_url,
@@ -178,13 +175,13 @@ pub mod test_utils {
     }
 
     /// Create read/write database for testing
-    pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<TempDatabase<DatabaseEnv>> {
+    pub async fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<TempDatabase<DatabaseEnv>> {
 
         let image = GenericImage::new("redis", "latest")
             .with_exposed_port(6379.tcp())
             .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"));
-        let container = start_redis();
-        let redis_url = get_redis_url(&container);
+        let container = get_redis_container().await;
+        let redis_url = get_redis_url(&container).await;
 
         let path = path.as_ref().to_path_buf();
         let db = init_db(
@@ -198,11 +195,11 @@ pub mod test_utils {
     }
 
     /// Create read only database for testing
-    pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
+    pub async fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let args = DatabaseArguments::new(ClientVersion::default())
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
-        let container = start_redis();
-        let redis_url = get_redis_url(&container);
+        let container = get_redis_container().await;
+        let redis_url = get_redis_url(&container).await;
 
         let path = tempdir_path();
         {
@@ -224,11 +221,11 @@ mod tests {
     use std::time::Duration;
     use tempfile::tempdir;
 
-    #[test]
-    fn db_version() {
+    #[tokio::test]
+    async fn db_version() {
         let path = tempdir().unwrap();
-        let container = test_utils::start_redis();
-        let redis_url = test_utils::get_redis_url(&container);
+        let container = test_utils::get_redis_container().await;
+        let redis_url = test_utils::get_redis_url(&container).await;
 
         let args = DatabaseArguments::new(ClientVersion::default())
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
@@ -269,11 +266,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn db_client_version() {
+    #[tokio::test]
+    async fn db_client_version() {
         let path = tempdir().unwrap();
-        let container = test_utils::start_redis();
-        let redis_url = test_utils::get_redis_url(&container);
+        let container = test_utils::get_redis_container().await;
+        let redis_url = test_utils::get_redis_url(&container).await;
 
         // Empty client version is not recorded
         {

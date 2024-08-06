@@ -16,16 +16,16 @@ pub use mock::{ExtendedAccount, MockEthProvider};
 pub use noop::NoopProvider;
 
 /// Creates test provider factory with mainnet chain spec.
-pub fn create_test_provider_factory() -> ProviderFactory<Arc<TempDatabase<DatabaseEnv>>> {
-    create_test_provider_factory_with_chain_spec(MAINNET.clone())
+pub async fn create_test_provider_factory() -> ProviderFactory<Arc<TempDatabase<DatabaseEnv>>> {
+    create_test_provider_factory_with_chain_spec(MAINNET.clone()).await
 }
 
 /// Creates test provider factory with provided chain spec.
-pub fn create_test_provider_factory_with_chain_spec(
+pub async fn create_test_provider_factory_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
 ) -> ProviderFactory<Arc<TempDatabase<DatabaseEnv>>> {
     let (static_dir, _) = create_test_static_files_dir();
-    let db = create_test_rw_db();
+    let db = create_test_rw_db().await;
     ProviderFactory::new(
         db,
         chain_spec,

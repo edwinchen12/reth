@@ -72,6 +72,7 @@ where
         let _enter = span.enter();
         let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
+            .await
             .node(Default::default())
             .launch()
             .await?;

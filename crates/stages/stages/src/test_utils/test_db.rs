@@ -38,10 +38,12 @@ impl Default for TestStageDB {
     /// Create a new instance of [`TestStageDB`]
     fn default() -> Self {
         let (static_dir, static_dir_path) = create_test_static_files_dir();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let db = rt.block_on(create_test_rw_db());
         Self {
             temp_static_files_dir: static_dir,
             factory: ProviderFactory::new(
-                create_test_rw_db(),
+                db,
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
             ),
@@ -50,13 +52,13 @@ impl Default for TestStageDB {
 }
 
 impl TestStageDB {
-    pub fn new(path: &Path) -> Self {
+    pub async fn new(path: &Path) -> Self {
         let (static_dir, static_dir_path) = create_test_static_files_dir();
 
         Self {
             temp_static_files_dir: static_dir,
             factory: ProviderFactory::new(
-                create_test_rw_db_with_path(path),
+                create_test_rw_db_with_path(path).await,
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
             ),

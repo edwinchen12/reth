@@ -5,11 +5,11 @@ use reth_node_api::FullNodeComponents;
 use reth_node_builder::{NodeBuilder, NodeConfig};
 use reth_node_ethereum::node::EthereumNode;
 
-#[test]
-fn test_basic_setup() {
+#[tokio::test]
+async fn test_basic_setup() {
     // parse CLI -> config
     let config = NodeConfig::test();
-    let db = create_test_rw_db();
+    let db = create_test_rw_db().await;
     let msg = "On components".to_string();
     let _builder = NodeBuilder::new(config)
         .with_database(db)
@@ -34,10 +34,10 @@ fn test_basic_setup() {
         .check_launch();
 }
 
-#[test]
-fn test_node_setup() {
+#[tokio::test]
+async fn test_node_setup() {
     let config = NodeConfig::test();
-    let db = create_test_rw_db();
+    let db = create_test_rw_db().await;
     let _builder =
         NodeBuilder::new(config).with_database(db).node(EthereumNode::default()).check_launch();
 }

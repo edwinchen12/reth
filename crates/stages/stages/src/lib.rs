@@ -39,7 +39,7 @@
 //! #    Arc::new(TestHeadersClient::default()),
 //! #    consensus.clone()
 //! # );
-//! # let provider_factory = create_test_provider_factory();
+//! # let provider_factory = create_test_provider_factory().await;
 //! # let bodies_downloader = BodiesDownloaderBuilder::default().build(
 //! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::ZERO, vec![]).into()) }),
 //! #    consensus.clone(),

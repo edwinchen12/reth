@@ -642,7 +642,7 @@ mod tests {
     /// Runs a simple pipeline.
     #[tokio::test]
     async fn run_pipeline() {
-        let provider_factory = create_test_provider_factory();
+        let provider_factory = create_test_provider_factory().await;
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -710,7 +710,7 @@ mod tests {
     /// Unwinds a simple pipeline.
     #[tokio::test]
     async fn unwind_pipeline() {
-        let provider_factory = create_test_provider_factory();
+        let provider_factory = create_test_provider_factory().await;
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -844,7 +844,7 @@ mod tests {
     /// Unwinds a pipeline with intermediate progress.
     #[tokio::test]
     async fn unwind_pipeline_with_intermediate_progress() {
-        let provider_factory = create_test_provider_factory();
+        let provider_factory = create_test_provider_factory().await;
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -944,7 +944,7 @@ mod tests {
     /// - The pipeline finishes
     #[tokio::test]
     async fn run_pipeline_with_unwind() {
-        let provider_factory = create_test_provider_factory();
+        let provider_factory = create_test_provider_factory().await;
 
         let mut pipeline = Pipeline::builder()
             .add_stage(
@@ -1066,7 +1066,7 @@ mod tests {
     #[tokio::test]
     async fn pipeline_error_handling() {
         // Non-fatal
-        let provider_factory = create_test_provider_factory();
+        let provider_factory = create_test_provider_factory().await;
         let mut pipeline = Pipeline::builder()
             .add_stage(
                 TestStage::new(StageId::Other("NonFatal"))
@@ -1082,7 +1082,7 @@ mod tests {
         assert_matches!(result, Ok(()));
 
         // Fatal
-        let provider_factory = create_test_provider_factory();
+        let provider_factory = create_test_provider_factory().await;
         let mut pipeline = Pipeline::builder()
             .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),

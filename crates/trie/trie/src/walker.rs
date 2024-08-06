@@ -255,8 +255,8 @@ mod tests {
     use reth_primitives::trie::{StorageTrieEntry, StoredBranchNode};
     use reth_provider::test_utils::create_test_provider_factory;
 
-    #[test]
-    fn walk_nodes_with_common_prefix() {
+    #[tokio::test]
+    async fn walk_nodes_with_common_prefix() {
         let inputs = vec![
             (vec![0x5u8], BranchNodeCompact::new(0b1_0000_0101, 0b1_0000_0100, 0, vec![], None)),
             (vec![0x5u8, 0x2, 0xC], BranchNodeCompact::new(0b1000_0111, 0, 0, vec![], None)),
@@ -278,7 +278,7 @@ mod tests {
             vec![0x5, 0x8, 0x2],
         ];
 
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
         let tx = factory.provider_rw().unwrap();
 
         let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
@@ -320,9 +320,9 @@ mod tests {
         assert!(got.is_none());
     }
 
-    #[test]
-    fn cursor_rootnode_with_changesets() {
-        let factory = create_test_provider_factory();
+    #[tokio::test]
+    async fn cursor_rootnode_with_changesets() {
+        let factory = create_test_provider_factory().await;
         let tx = factory.provider_rw().unwrap();
         let mut cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 

@@ -21,6 +21,11 @@ reth-codecs.workspace = true
 # misc
 eyre.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, default-features = false, features = [
+    "sync",
+    "rt",
+    "macros",
+] }
 
 # io
 serde.workspace = true

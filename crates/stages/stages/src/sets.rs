@@ -23,7 +23,7 @@
 //!
 //! # fn create(exec: impl BlockExecutorProvider) {
 //!
-//! let provider_factory = create_test_provider_factory();
+//! let provider_factory = create_test_provider_factory().await;
 //! let static_file_producer =
 //!     StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 //! // Build a pipeline with all offline stages.

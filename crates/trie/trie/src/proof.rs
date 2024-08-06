@@ -236,10 +236,10 @@ mod tests {
         Ok(root)
     }
 
-    #[test]
-    fn testspec_proofs() {
+    #[tokio::test]
+    async fn testspec_proofs() {
         // Create test database and insert genesis accounts.
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
         let root = insert_genesis(&factory, TEST_SPEC.clone()).unwrap();
 
         let data = Vec::from([
@@ -294,10 +294,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn testspec_empty_storage_proof() {
+    #[tokio::test]
+    async fn testspec_empty_storage_proof() {
         // Create test database and insert genesis accounts.
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
         let root = insert_genesis(&factory, TEST_SPEC.clone()).unwrap();
 
         let target = Address::from_str("0x1ed9b1dd266b607ee278726d324b855a093394a6").unwrap();
@@ -316,10 +316,10 @@ mod tests {
         assert_eq!(account_proof.verify(root), Ok(()));
     }
 
-    #[test]
-    fn mainnet_genesis_account_proof() {
+    #[tokio::test]
+    async fn mainnet_genesis_account_proof() {
         // Create test database and insert genesis accounts.
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
         let root = insert_genesis(&factory, MAINNET.clone()).unwrap();
 
         // Address from mainnet genesis allocation.
@@ -341,10 +341,10 @@ mod tests {
         assert_eq!(account_proof.verify(root), Ok(()));
     }
 
-    #[test]
-    fn mainnet_genesis_account_proof_nonexistent() {
+    #[tokio::test]
+    async fn mainnet_genesis_account_proof_nonexistent() {
         // Create test database and insert genesis accounts.
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
         let root = insert_genesis(&factory, MAINNET.clone()).unwrap();
 
         // Address that does not exist in mainnet genesis allocation.
@@ -364,10 +364,10 @@ mod tests {
         assert_eq!(account_proof.verify(root), Ok(()));
     }
 
-    #[test]
-    fn holesky_deposit_contract_proof() {
+    #[tokio::test]
+    async fn holesky_deposit_contract_proof() {
         // Create test database and insert genesis accounts.
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
         let root = insert_genesis(&factory, HOLESKY.clone()).unwrap();
 
         let target = Address::from_str("0x4242424242424242424242424242424242424242").unwrap();

@@ -43,6 +43,7 @@ use std::{
 };
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
+use tokio::task;
 
 /// A test [`PoolBuilder`] that builds a [`TestPool`].
 #[derive(Debug, Default, Clone, Copy)]
@@ -199,7 +200,7 @@ pub async fn test_exex_context_with_chain_spec(
     let evm_config = EthEvmConfig::default();
     let executor = MockExecutorProvider::default();
 
-    let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
+    let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec).await;
     let genesis_hash = init_genesis(provider_factory.clone())?;
     let provider =
         BlockchainProvider::new(provider_factory.clone(), Arc::new(NoopBlockchainTree::default()))?;

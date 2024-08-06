@@ -238,7 +238,7 @@ mod tests {
     async fn random_async_root() {
         let blocking_pool = BlockingTaskPool::new(ThreadPoolBuilder::default().build().unwrap());
 
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
         let consistent_view = ConsistentDbView::new(factory.clone(), None);
 
         let mut rng = rand::thread_rng();

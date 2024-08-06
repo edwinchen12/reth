@@ -25,10 +25,10 @@ where
     }
 }
 
-#[test]
-fn basic_exex() {
+#[tokio::test]
+async fn basic_exex() {
     let config = NodeConfig::test();
-    let db = create_test_rw_db();
+    let db = create_test_rw_db().await;
     let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types::<EthereumNode>()

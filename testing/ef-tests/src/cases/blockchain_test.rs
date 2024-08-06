@@ -60,7 +60,7 @@ impl Case for BlockchainTestCase {
     ///
     /// # Errors
     /// Returns an error if the test is flagged for skipping or encounters issues during execution.
-    fn run(&self) -> Result<(), Error> {
+    async fn run(&self) -> Result<(), Error> {
         // If the test is marked for skipping, return a Skipped error immediately.
         if self.skip {
             return Err(Error::Skipped)
@@ -84,7 +84,8 @@ impl Case for BlockchainTestCase {
             .par_bridge()
             .try_for_each(|case| {
                 // Create a new test database and initialize a provider for the test case.
-                let db = create_test_rw_db();
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let db = rt.block_on(create_test_rw_db());
                 let (_static_files_dir, static_files_dir_path) = create_test_static_files_dir();
                 let provider = ProviderFactory::new(
                     db.as_ref(),

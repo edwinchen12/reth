@@ -222,7 +222,7 @@ mod tests {
 
     #[tokio::test]
     async fn random_parallel_root() {
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
         let consistent_view = ConsistentDbView::new(factory.clone(), None);
 
         let mut rng = rand::thread_rng();

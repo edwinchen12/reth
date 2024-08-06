@@ -2010,7 +2010,8 @@ mod tests {
             .with_pipeline_exec_outputs(VecDeque::from([Err(StageError::ChannelClosed)]))
             .disable_blockchain_tree_sync()
             .with_max_block(1)
-            .build();
+            .build()
+            .await;
 
         let res = spawn_consensus_engine(consensus_engine);
 
@@ -2042,7 +2043,8 @@ mod tests {
             .with_pipeline_exec_outputs(VecDeque::from([Err(StageError::ChannelClosed)]))
             .disable_blockchain_tree_sync()
             .with_max_block(1)
-            .build();
+            .build()
+            .await;
 
         let mut rx = spawn_consensus_engine(consensus_engine);
 
@@ -2109,7 +2111,8 @@ mod tests {
             ]))
             .disable_blockchain_tree_sync()
             .with_max_block(2)
-            .build();
+            .build()
+            .await;
 
         let rx = spawn_consensus_engine(consensus_engine);
 
@@ -2146,7 +2149,8 @@ mod tests {
             })]))
             .with_max_block(max_block)
             .disable_blockchain_tree_sync()
-            .build();
+            .build()
+            .await;
 
         let rx = spawn_consensus_engine(consensus_engine);
 
@@ -2201,7 +2205,8 @@ mod tests {
                     checkpoint: StageCheckpoint::new(0),
                     done: true,
                 })]))
-                .build();
+                .build()
+                .await;
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
@@ -2232,7 +2237,8 @@ mod tests {
                     checkpoint: StageCheckpoint::new(0),
                     done: true,
                 })]))
-                .build();
+                .build()
+                .await;
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
@@ -2291,7 +2297,8 @@ mod tests {
                     Ok(ExecOutput { checkpoint: StageCheckpoint::new(0), done: true }),
                 ]))
                 .disable_blockchain_tree_sync()
-                .build();
+                .build()
+                .await;
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
@@ -2359,7 +2366,8 @@ mod tests {
                     done: true,
                 })]))
                 .disable_blockchain_tree_sync()
-                .build();
+                .build()
+                .await;
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
@@ -2406,7 +2414,8 @@ mod tests {
                     Ok(ExecOutput { checkpoint: StageCheckpoint::new(0), done: true }),
                     Ok(ExecOutput { checkpoint: StageCheckpoint::new(0), done: true }),
                 ]))
-                .build();
+                .build()
+                .await;
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let mut block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
@@ -2463,7 +2472,8 @@ mod tests {
                     Ok(ExecOutput { checkpoint: StageCheckpoint::new(0), done: true }),
                     Ok(ExecOutput { checkpoint: StageCheckpoint::new(0), done: true }),
                 ]))
-                .build();
+                .build()
+                .await;
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
@@ -2521,7 +2531,8 @@ mod tests {
                     checkpoint: StageCheckpoint::new(0),
                     done: true,
                 })]))
-                .build();
+                .build()
+                .await;
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
@@ -2566,7 +2577,8 @@ mod tests {
                     checkpoint: StageCheckpoint::new(0),
                     done: true,
                 })]))
-                .build();
+                .build()
+                .await;
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
             let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0));
@@ -2634,7 +2646,8 @@ mod tests {
                 .with_real_pipeline()
                 .with_real_executor()
                 .with_real_consensus()
-                .build();
+                .build()
+                .await;
 
             let genesis =
                 SealedBlock { header: chain_spec.sealed_genesis_header(), ..Default::default() };
@@ -2686,7 +2699,8 @@ mod tests {
                     checkpoint: StageCheckpoint::new(0),
                     done: true,
                 })]))
-                .build();
+                .build()
+                .await;
 
             let genesis = random_block(&mut rng, 0, None, None, Some(0));
 
@@ -2755,7 +2769,8 @@ mod tests {
                     done: true,
                 })]))
                 .with_executor_results(Vec::from([exec_result2]))
-                .build();
+                .build()
+                .await;
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 

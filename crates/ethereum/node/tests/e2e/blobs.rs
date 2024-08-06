@@ -35,6 +35,7 @@ async fn can_handle_blobs() -> eyre::Result<()> {
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
         .testing_node(exec.clone())
+        .await
         .node(EthereumNode::default())
         .launch()
         .await?;

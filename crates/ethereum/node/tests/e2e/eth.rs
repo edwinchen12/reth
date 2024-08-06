@@ -71,6 +71,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(exec)
+        .await
         .node(EthereumNode::default())
         .launch()
         .await?;
@@ -116,6 +117,7 @@ async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyr
     let node_config = NodeConfig::test().with_chain(chain_spec);
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(exec)
+        .await
         .node(EthereumNode::default())
         .launch()
         .await?;

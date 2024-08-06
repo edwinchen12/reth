@@ -342,6 +342,7 @@ async fn main() -> eyre::Result<()> {
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
+        .await
         .launch_node(MyCustomNode::default())
         .await
         .unwrap();

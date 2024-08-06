@@ -2663,6 +2663,7 @@ name = "ef-tests"
 version = "0.2.0-beta.9"
 dependencies = [
  "alloy-rlp",
+ "futures",
  "rayon",
  "reth-db",
  "reth-db-api",
@@ -2673,6 +2674,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "walkdir",
 ]
 
@@ -6813,6 +6815,7 @@ dependencies = [
  "tempfile",
  "test-fuzz",
  "testcontainers",
+ "testcontainers-modules",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -6861,6 +6864,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "tracing",
 ]
 
@@ -9831,6 +9835,15 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "url",
+]
+
+[[package]]
+name = "testcontainers-modules"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a433ba83c79b59254a8a712c2c435750272574ddbc57091b69724d2696dc57d"
+dependencies = [
+ "testcontainers",
 ]
 
 [[package]]

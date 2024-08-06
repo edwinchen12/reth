@@ -26,7 +26,7 @@ pub trait Suite {
     /// # Note
     ///
     /// This recursively finds every test description in the resulting path.
-    fn run(&self) {
+    async fn run(&self) {
         // Build the path to the test suite directory
         let suite_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("ethereum-tests")
@@ -45,7 +45,7 @@ pub trait Suite {
             .collect();
 
         // Run the test cases and collect the results
-        let results = Cases { test_cases }.run();
+        let results = Cases { test_cases }.run().await;
 
         // Assert that all tests in the suite pass
         assert_tests_pass(&self.suite_name(), &suite_path, &results);

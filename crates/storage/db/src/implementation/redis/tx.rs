@@ -508,10 +508,10 @@ mod tests {
     use tempfile::tempdir;
     use crate::implementation::redis::{DatabaseArguments, DatabaseEnv, DatabaseKind};
 
-    #[test]
-    fn get_not_found_key() {
-        let container = test_utils::start_redis();
-        let redis_url = test_utils::get_redis_url(&container);
+    #[tokio::test]
+    async fn get_not_found_key() {
+        let container = test_utils::get_redis_container().await;
+        let redis_url = test_utils::get_redis_url(&container).await;
 
         let dir = tempdir().unwrap();
         let args = DatabaseArguments::new(ClientVersion::default());

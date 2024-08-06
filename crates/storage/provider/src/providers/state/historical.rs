@@ -424,9 +424,9 @@ mod tests {
         assert_state_provider::<HistoricalStateProvider<T>>();
     }
 
-    #[test]
-    fn history_provider_get_account() {
-        let factory = create_test_provider_factory();
+    #[tokio::test]
+    async fn history_provider_get_account() {
+        let factory = create_test_provider_factory().await;
         let tx = factory.provider_rw().unwrap().into_tx();
         let static_file_provider = factory.static_file_provider();
 
@@ -549,9 +549,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn history_provider_get_storage() {
-        let factory = create_test_provider_factory();
+    #[tokio::test]
+    async fn history_provider_get_storage() {
+        let factory = create_test_provider_factory().await;
         let tx = factory.provider_rw().unwrap().into_tx();
         let static_file_provider = factory.static_file_provider();
 
@@ -655,9 +655,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn history_provider_unavailable() {
-        let factory = create_test_provider_factory();
+    #[tokio::test]
+    async fn history_provider_unavailable() {
+        let factory = create_test_provider_factory().await;
         let tx = factory.provider_rw().unwrap().into_tx();
         let static_file_provider = factory.static_file_provider();
 

@@ -14,7 +14,7 @@ use reth_trie::{
 use reth_trie_parallel::{async_root::AsyncStateRoot, parallel_root::ParallelStateRoot};
 use std::collections::HashMap;
 
-pub fn calculate_state_root(c: &mut Criterion) {
+pub async fn calculate_state_root(c: &mut Criterion) {
     let mut group = c.benchmark_group("Calculate State Root");
     group.sample_size(20);
 
@@ -23,7 +23,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
 
     for size in [1_000, 3_000, 5_000, 10_000] {
         let (db_state, updated_state) = generate_test_data(size);
-        let provider_factory = create_test_provider_factory();
+        let provider_factory = create_test_provider_factory().await;
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
             HashedStateChanges(db_state).write_to_db(provider_rw.tx_ref()).unwrap();

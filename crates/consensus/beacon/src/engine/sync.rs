@@ -484,7 +484,7 @@ mod tests {
         }
 
         /// Builds the pipeline.
-        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
+        async fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
             reth_tracing::init_test_tracing();
 
             // Setup pipeline
@@ -497,7 +497,7 @@ mod tests {
                 pipeline = pipeline.with_max_block(max_block);
             }
 
-            let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
+            let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec).await;
 
             let static_file_producer =
                 StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
@@ -576,7 +576,8 @@ mod tests {
                 checkpoint: StageCheckpoint::new(5),
                 done: true,
             })]))
-            .build(chain_spec.clone());
+            .build(chain_spec.clone())
+            .await;
 
         let mut sync_controller = TestSyncControllerBuilder::new()
             .with_client(client.clone())
@@ -642,7 +643,9 @@ mod tests {
         insert_headers_into_client(&client, header, 0..10);
 
         // set up a pipeline
-        let pipeline = TestPipelineBuilder::new().build(chain_spec.clone());
+        let pipeline = TestPipelineBuilder::new()
+            .build(chain_spec.clone())
+            .await;
 
         let mut sync_controller = TestSyncControllerBuilder::new()
             .with_client(client.clone())

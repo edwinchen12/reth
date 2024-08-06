@@ -123,9 +123,9 @@ mod tests {
     };
     use reth_provider::test_utils::create_test_provider_factory;
 
-    #[test]
-    fn test_account_trie_order() {
-        let factory = create_test_provider_factory();
+    #[tokio::test]
+    async fn test_account_trie_order() {
+        let factory = create_test_provider_factory().await;
         let provider = factory.provider_rw().unwrap();
         let mut cursor = provider.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
 
@@ -164,9 +164,9 @@ mod tests {
     }
 
     // tests that upsert and seek match on the storage trie cursor
-    #[test]
-    fn test_storage_cursor_abstraction() {
-        let factory = create_test_provider_factory();
+    #[tokio::test]
+    async fn test_storage_cursor_abstraction() {
+        let factory = create_test_provider_factory().await;
         let provider = factory.provider_rw().unwrap();
         let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
 

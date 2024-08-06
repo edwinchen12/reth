@@ -145,6 +145,7 @@ async fn main() -> eyre::Result<()> {
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
+        .await
         .with_types::<EthereumNode>()
         .with_components(EthereumNode::components().executor(MyExecutorBuilder::default()))
         .launch()

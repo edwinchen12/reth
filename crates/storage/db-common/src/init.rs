@@ -546,36 +546,36 @@ mod tests {
         Ok(tx.cursor_read::<T>()?.walk_range(..)?.collect::<Result<Vec<_>, _>>()?)
     }
 
-    #[test]
-    fn success_init_genesis_mainnet() {
-        let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(MAINNET.clone())).unwrap();
+    #[tokio::test]
+    async fn success_init_genesis_mainnet() {
+        let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone()).await;
+        let genesis_hash = init_genesis(factory).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, MAINNET_GENESIS_HASH);
     }
 
-    #[test]
-    fn success_init_genesis_goerli() {
-        let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(GOERLI.clone())).unwrap();
+    #[tokio::test]
+    async fn success_init_genesis_goerli() {
+        let factory = create_test_provider_factory_with_chain_spec(GOERLI.clone()).await;
+        let genesis_hash = init_genesis(factory).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, GOERLI_GENESIS_HASH);
     }
 
-    #[test]
-    fn success_init_genesis_sepolia() {
-        let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
+    #[tokio::test]
+    async fn success_init_genesis_sepolia() {
+        let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone()).await;
+        let genesis_hash = init_genesis(factory).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
     }
 
-    #[test]
-    fn fail_init_inconsistent_db() {
-        let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
+    #[tokio::test]
+    async fn fail_init_inconsistent_db() {
+        let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone()).await;
         let static_file_provider = factory.static_file_provider();
         init_genesis(factory.clone()).unwrap();
 
@@ -595,8 +595,8 @@ mod tests {
         )
     }
 
-    #[test]
-    fn init_genesis_history() {
+    #[tokio::test]
+    async fn init_genesis_history() {
         let address_with_balance = Address::with_last_byte(1);
         let address_with_storage = Address::with_last_byte(2);
         let storage_key = B256::with_last_byte(1);
@@ -625,7 +625,7 @@ mod tests {
             ..Default::default()
         });
 
-        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec).await;
         init_genesis(factory.clone()).unwrap();
 
         let provider = factory.provider().unwrap();

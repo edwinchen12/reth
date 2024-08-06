@@ -176,7 +176,7 @@ impl<DB> NodeBuilder<DB> {
     }
 
     /// Creates an _ephemeral_ preconfigured node for testing purposes.
-    pub fn testing_node(
+    pub async fn testing_node(
         mut self,
         task_executor: TaskExecutor,
     ) -> WithLaunchContext<NodeBuilder<Arc<TempDatabase<DatabaseEnv>>>> {
@@ -188,7 +188,7 @@ impl<DB> NodeBuilder<DB> {
         let data_dir =
             path.unwrap_or_chain_default(self.config.chain.chain, self.config.datadir.clone());
 
-        let db = create_test_rw_db_with_path(data_dir.db());
+        let db = create_test_rw_db_with_path(data_dir.db()).await;
 
         WithLaunchContext { builder: self.with_database(db), task_executor }
     }

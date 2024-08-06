@@ -1397,7 +1397,7 @@ mod tests {
     use reth_trie::StateRoot;
     use std::collections::HashMap;
 
-    fn setup_externals(
+    async fn setup_externals(
         exec_res: Vec<BundleStateWithReceipts>,
     ) -> TreeExternals<Arc<TempDatabase<DatabaseEnv>>, MockExecutorProvider> {
         let chain_spec = Arc::new(
@@ -1407,7 +1407,7 @@ mod tests {
                 .shanghai_activated()
                 .build(),
         );
-        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec).await;
         let consensus = Arc::new(TestConsensus::default());
         let executor_factory = MockExecutorProvider::default();
         executor_factory.extend(exec_res);
@@ -1518,8 +1518,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn consecutive_reorgs() {
+    #[tokio::test]
+    async fn consecutive_reorgs() {
         let signer = Address::random();
         let initial_signer_balance = U256::from(10).pow(U256::from(18));
         let chain_spec = Arc::new(
@@ -1535,7 +1535,7 @@ mod tests {
                 .shanghai_activated()
                 .build(),
         );
-        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone()).await;
         let consensus = Arc::new(TestConsensus::default());
         let executor_provider = EthExecutorProvider::ethereum(chain_spec.clone());
 
@@ -1710,8 +1710,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn sidechain_block_hashes() {
+    #[tokio::test]
+    async fn sidechain_block_hashes() {
         let data = BlockchainTestData::default_from_number(11);
         let (block1, exec1) = data.blocks[0].clone();
         let (block2, exec2) = data.blocks[1].clone();
@@ -1721,7 +1721,7 @@ mod tests {
 
         // test pops execution results from vector, so order is from last to first.
         let externals =
-            setup_externals(vec![exec3.clone(), exec2.clone(), exec4, exec3, exec2, exec1]);
+            setup_externals(vec![exec3.clone(), exec2.clone(), exec4, exec3, exec2, exec1]).await;
 
         // last finalized block would be number 9.
         setup_genesis(&externals.provider_factory, genesis);
@@ -1786,8 +1786,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn cached_trie_updates() {
+    #[tokio::test]
+    async fn cached_trie_updates() {
         let data = BlockchainTestData::default_from_number(11);
         let (block1, exec1) = data.blocks[0].clone();
         let (block2, exec2) = data.blocks[1].clone();
@@ -1797,7 +1797,7 @@ mod tests {
         let genesis = data.genesis;
 
         // test pops execution results from vector, so order is from last to first.
-        let externals = setup_externals(vec![exec5.clone(), exec4, exec3, exec2, exec1]);
+        let externals = setup_externals(vec![exec5.clone(), exec4, exec3, exec2, exec1]).await;
 
         // last finalized block would be number 9.
         setup_genesis(&externals.provider_factory, genesis);
@@ -1874,15 +1874,15 @@ mod tests {
         assert_eq!(state_root, block5.state_root);
     }
 
-    #[test]
-    fn test_side_chain_fork() {
+    #[tokio::test]
+    async fn test_side_chain_fork() {
         let data = BlockchainTestData::default_from_number(11);
         let (block1, exec1) = data.blocks[0].clone();
         let (block2, exec2) = data.blocks[1].clone();
         let genesis = data.genesis;
 
         // test pops execution results from vector, so order is from last to first.
-        let externals = setup_externals(vec![exec2.clone(), exec2, exec1]);
+        let externals = setup_externals(vec![exec2.clone(), exec2, exec1]).await;
 
         // last finalized block would be number 9.
         setup_genesis(&externals.provider_factory, genesis);
@@ -1972,15 +1972,15 @@ mod tests {
         assert_eq!(chain1.first_block(), block2.number);
     }
 
-    #[test]
-    fn sanity_path() {
+    #[tokio::test]
+    async fn sanity_path() {
         let data = BlockchainTestData::default_from_number(11);
         let (block1, exec1) = data.blocks[0].clone();
         let (block2, exec2) = data.blocks[1].clone();
         let genesis = data.genesis;
 
         // test pops execution results from vector, so order is from last to first.
-        let externals = setup_externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]);
+        let externals = setup_externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]).await;
 
         // last finalized block would be number 9.
         setup_genesis(&externals.provider_factory, genesis);
@@ -2353,8 +2353,8 @@ mod tests {
             .assert(&tree);
     }
 
-    #[test]
-    fn last_finalized_block_initialization() {
+    #[tokio::test]
+    async fn last_finalized_block_initialization() {
         let data = BlockchainTestData::default_from_number(11);
         let (block1, exec1) = data.blocks[0].clone();
         let (block2, exec2) = data.blocks[1].clone();
@@ -2363,7 +2363,7 @@ mod tests {
 
         // test pops execution results from vector, so order is from last to first.
         let externals =
-            setup_externals(vec![exec3.clone(), exec2.clone(), exec1.clone(), exec3, exec2, exec1]);
+            setup_externals(vec![exec3.clone(), exec2.clone(), exec1.clone(), exec3, exec2, exec1]).await;
         let cloned_externals_1 = TreeExternals {
             provider_factory: externals.provider_factory.clone(),
             executor_factory: externals.executor_factory.clone(),

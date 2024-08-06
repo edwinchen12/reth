@@ -62,9 +62,9 @@ mod tests {
     use reth_primitives::{keccak256, Account, Address, B256};
     use reth_trie::HashedStorage;
 
-    #[test]
-    fn wiped_entries_are_removed() {
-        let provider_factory = create_test_provider_factory();
+    #[tokio::test]
+    async fn wiped_entries_are_removed() {
+        let provider_factory = create_test_provider_factory().await;
 
         let addresses = (0..10).map(|_| Address::random()).collect::<Vec<_>>();
         let destroyed_address = *addresses.first().unwrap();
