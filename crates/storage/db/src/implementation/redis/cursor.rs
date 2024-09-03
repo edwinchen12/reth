@@ -16,6 +16,7 @@ use reth_db_api::{
 use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds, sync::Arc};
+use redis::{Client, Commands, ErrorKind, RedisError, RedisResult};
 
 /// Read only Cursor.
 pub type CursorRO<T> = Cursor<RO, T>;
@@ -33,14 +34,49 @@ pub struct Cursor<K: TransactionKind, T: Table> {
     metrics: Option<Arc<DatabaseEnvMetrics>>,
     /// Phantom data to enforce encoding/decoding.
     _dbi: PhantomData<T>,
+
+    /// redis client
+    redis: Arc<Client>,
+}
+
+#[inline]
+fn from(value: RedisError) -> DatabaseErrorInfo {
+    let code = match value.kind() {
+        ErrorKind::ResponseError => 1,
+        ErrorKind::ParseError => 2,
+        ErrorKind::AuthenticationFailed => 3,
+        ErrorKind::TypeError => 4,
+        ErrorKind::ExecAbortError => 5,
+        ErrorKind::BusyLoadingError => 6,
+        ErrorKind::NoScriptError => 7,
+        ErrorKind::InvalidClientConfig => 8,
+        ErrorKind::Moved => 9,
+        ErrorKind::Ask => 10,
+        ErrorKind::TryAgain => 11,
+        ErrorKind::ClusterDown => 12,
+        ErrorKind::CrossSlot => 13,
+        ErrorKind::MasterDown => 14,
+        ErrorKind::IoError => 15,
+        ErrorKind::ClientError => 16,
+        ErrorKind::ExtensionError => 17,
+        ErrorKind::ReadOnly => 18,
+        ErrorKind::MasterNameNotFoundBySentinel => 19,
+        ErrorKind::NoValidReplicasFoundBySentinel => 20,
+        ErrorKind::EmptySentinelList => 21,
+        ErrorKind::NotBusy => 22,
+        ErrorKind::ClusterConnectionNotFound => 23,
+        _ => 0,
+    };
+    DatabaseErrorInfo { message: value.to_string(), code }
 }
 
 impl<K: TransactionKind, T: Table> Cursor<K, T> {
     pub(crate) fn new_with_metrics(
         inner: reth_libmdbx::Cursor<K>,
+        redis: Arc<Client>,
         metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> Self {
-        Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData }
+        Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData, redis }
     }
 
     /// If `self.metrics` is `Some(...)`, record a metric with the provided operation and value
@@ -243,8 +279,14 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     /// to properly upsert, you'll need to `seek_exact` & `delete_current` if the key+subkey was
     /// found, before calling `upsert`.
     fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        let key_copy = key.clone();
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
+
+        let redis_key = generate_redis_key::<T>(&key_copy);
+        let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
+        let res: RedisResult<()> = connection.set(redis_key.clone(), value.unwrap_or(&self.buf));
+
         self.execute_with_operation_metric(
             Operation::CursorUpsert,
             Some(value.unwrap_or(&self.buf).len()),
@@ -315,6 +357,13 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
             this.inner.del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
         })
     }
+}
+
+fn generate_redis_key<T: Table>(key: &T::Key) -> Vec<u8> {
+    let prefix = format!("{}:", T::NAME);
+    let encoded_key = key.clone().encode();
+    let encoded_key= encoded_key.as_ref();
+    [prefix.encode().as_slice(), encoded_key].concat()
 }
 
 impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {

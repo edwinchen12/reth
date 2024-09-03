@@ -16,9 +16,12 @@ use std::{backtrace::Backtrace, fmt, marker::PhantomData, string::String, sync::
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::{Debug, Pointer};
+use std::ops::Deref;
 use std::sync::RwLock;
-use redis::{Client, Commands, ErrorKind, Iter, Pipeline, RedisError};
-use reth_db_api::table::{Key, Value};
+use redis::{Client, Commands, ErrorKind, Iter, Pipeline, RedisError, RedisResult};
+use reth_db_api::table::{Decode, Key, Value};
+use reth_primitives::alloy_primitives::private::alloy_rlp::Encodable;
 
 /// Duration after which we emit the log about long-lived database transactions.
 const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
@@ -43,10 +46,10 @@ pub struct Tx<K: TransactionKind> {
     pipeline: Arc<RwLock<Pipeline>>,
 
     /// redis data that has been changed in the transaction but not yet committed.
-    uncommitted_data: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+    uncommitted_data: Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>,
 
     /// redis key that has been deleted in the transaction but not yet committed.
-    deleted_keys: Arc<RwLock<HashMap<String, ()>>>,
+    deleted_keys: Arc<RwLock<HashMap<Vec<u8>, ()>>>,
 }
 
 #[inline]
@@ -87,8 +90,8 @@ impl<K: TransactionKind> Tx<K> {
         inner: Transaction<K>,
         redis: Arc<Client>,
         pipeline: Arc<RwLock<Pipeline>>,
-        uncommitted_data: Arc<RwLock<HashMap<String, Vec<u8>>>>,
-        deleted_keys: Arc<RwLock<HashMap<String, ()>>>) -> Self {
+        uncommitted_data: Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>,
+        deleted_keys: Arc<RwLock<HashMap<Vec<u8>, ()>>>) -> Self {
         Self::new_inner(inner, redis, None, pipeline, uncommitted_data, deleted_keys)
     }
 
@@ -117,8 +120,8 @@ impl<K: TransactionKind> Tx<K> {
         redis: Arc<Client>,
         metrics_handler: Option<MetricsHandler<K>>,
         pipeline: Arc<RwLock<Pipeline>>,
-        uncommitted_data: Arc<RwLock<HashMap<String, Vec<u8>>>>,
-        deleted_keys: Arc<RwLock<HashMap<String, ()>>>) -> Self {
+        uncommitted_data: Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>,
+        deleted_keys: Arc<RwLock<HashMap<Vec<u8>, ()>>>) -> Self {
         Self { inner, redis, metrics_handler, pipeline, uncommitted_data, deleted_keys }
     }
 
@@ -144,6 +147,7 @@ impl<K: TransactionKind> Tx<K> {
 
         Ok(Cursor::new_with_metrics(
             inner,
+            Arc::clone(&self.redis),
             self.metrics_handler.as_ref().map(|h| h.env_metrics.clone()),
         ))
     }
@@ -217,17 +221,17 @@ impl<K: TransactionKind> Tx<K> {
 
     /// Generates a Redis key for the given table and key.
     /// TODO: optimize this function
-    fn generate_redis_key<T: Table>(key: &T::Key) -> String {
+    fn generate_redis_key<T: Table>(key: &T::Key) -> Vec<u8> {
         // // let serialized_key: String = key.encode().to_string();
         // let mut serialized_key = T::NAME.as_bytes().to_vec();
         // serialized_key.push(b':');
         // serialized_key.extend(key.clone().encode().into());
         //
         // String::from_utf8(serialized_key).unwrap()
+        let prefix = format!("{}:", T::NAME);
         let encoded_key = key.clone().encode();
-        let key_str = String::from_utf8_lossy(encoded_key.as_ref()).into_owned();
-        format!("{}:{}", T::NAME, key_str)
-        // format!("{}:{}", T::NAME, String::from_utf8_lossy(key.clone().encode().as_ref()))
+        let encoded_key= encoded_key.as_ref();
+        [prefix.encode().as_slice(), encoded_key].concat()
     }
 
     fn clear_redis<T: Table>(&self) -> Result<(), DatabaseError> {
@@ -364,7 +368,6 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
         // let key: <<T as Table>::Key as Encode>::Encoded = key.encode();
         let redis_key = Tx::<K>::generate_redis_key::<T>(&key);
-        let key = key.encode();
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
             if self.deleted_keys.read().unwrap().contains_key(&redis_key) {
                 Ok(None)
@@ -472,7 +475,7 @@ impl DbTxMut for Tx<RW> {
             data = Some(value.as_ref());
         };
         let redis_key = Tx::<RW>::generate_redis_key::<T>(&key);
-        self.deleted_keys.write().unwrap().insert(redis_key.clone(), ());
+        self.deleted_keys.write().unwrap().insert(redis_key.clone().to_ascii_lowercase(), ());
         self.pipeline.write().unwrap().del(redis_key.clone());
 
         self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
