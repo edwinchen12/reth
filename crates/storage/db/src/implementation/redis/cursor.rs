@@ -16,7 +16,7 @@ use reth_db_api::{
 use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds, sync::Arc};
-use redis::{Client, Commands, ErrorKind, RedisError, RedisResult};
+use redis::{Client, Commands, ErrorKind, RedisError, RedisResult, ToRedisArgs, Value};
 
 /// Read only Cursor.
 pub type CursorRO<T> = Cursor<RO, T>;
@@ -37,6 +37,24 @@ pub struct Cursor<K: TransactionKind, T: Table> {
 
     /// redis client
     redis: Arc<Client>,
+
+    /// The current key the cursor is pointing to
+    current_key: Option<T::Key>
+}
+
+pub struct StateROCursor<K: TransactionKind, T: Table> {
+    /// Inner `libmdbx` cursor.
+    pub(crate) inner: reth_libmdbx::Cursor<K>,
+    /// Reference to metric handles in the DB environment. If `None`, metrics are not recorded.
+    metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Phantom data to enforce encoding/decoding.
+    _dbi: PhantomData<T>,
+
+    /// redis client
+    redis: Arc<Client>,
+
+    /// The current key the cursor is pointing to
+    current_key: Option<T::Key>
 }
 
 #[inline]
@@ -76,7 +94,34 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         redis: Arc<Client>,
         metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> Self {
-        Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData, redis }
+        Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData, redis, current_key: None }
+    }
+
+    /// If `self.metrics` is `Some(...)`, record a metric with the provided operation and value
+    /// size.
+    ///
+    /// Otherwise, just execute the closure.
+    fn execute_with_operation_metric<R>(
+        &mut self,
+        operation: Operation,
+        value_size: Option<usize>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        if let Some(metrics) = self.metrics.as_ref().cloned() {
+            metrics.record_operation(T::NAME, operation, value_size, || f(self))
+        } else {
+            f(self)
+        }
+    }
+}
+
+impl<K: TransactionKind, T: Table> StateROCursor<K, T> {
+    pub(crate) fn new_with_metrics(
+        inner: reth_libmdbx::Cursor<K>,
+        redis: Arc<Client>,
+        metrics: Option<Arc<DatabaseEnvMetrics>>,
+    ) -> Self {
+        Self { inner, metrics, _dbi: PhantomData, redis, current_key: None }
     }
 
     /// If `self.metrics` is `Some(...)`, record a metric with the provided operation and value
@@ -194,6 +239,227 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
     }
 }
 
+impl<K: TransactionKind, T: Table> DbCursorRO<T> for StateROCursor<K, T> {
+    fn first(&mut self) -> PairResult<T> {
+        let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
+        let sorted_set_key = generate_sorted_set_key::<T>();
+
+        let res : Result<Vec<String>, DatabaseError>= connection.zrangebylex_limit(sorted_set_key, "-", "+", 0, 1).map_err(|e| DatabaseError::Read(from(e)));
+        match res {
+            Ok(v) => {
+                if v.len() > 1 {
+                    panic!("Incorrect number of value returned")
+                } else if v.len() < 1 {
+                    Ok(None)
+                } else {
+                    let key_bytes = v[0].as_bytes();
+                    let redis_key = generate_redis_key_from_byte::<T>(key_bytes);
+                    let value: Option<Vec<u8>> = connection.get(redis_key).map_err(|e| DatabaseError::Read(from(e)))?;
+
+                    let key_value_pair:  Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, DatabaseErrorInfo> = match value {
+                        Some(v) =>Ok(Some((Cow::Owned(key_bytes.to_vec()), Cow::Owned(v)))),
+                        _ => Err(DatabaseError::Read(DatabaseErrorInfo{ message: "failed to get value".to_string(), code: 0 }))?
+                    };
+
+                    let decoded_res = decode::<T>(key_value_pair.clone());
+                    let decoded_res_copy = decode::<T>(key_value_pair);
+                    self.current_key = Some(decoded_res_copy.unwrap().unwrap().0);
+
+                    decoded_res
+                }
+            }
+            Err(e) => Err(e)
+        }
+    }
+
+    fn seek_exact(&mut self, key: <T as Table>::Key) -> PairResult<T> {
+        panic!("Not supported")
+    }
+
+    fn seek(&mut self, key: <T as Table>::Key) -> PairResult<T> {
+        let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
+        let sorted_set_key = generate_sorted_set_key::<T>();
+
+        let min: Vec<u8> = "[".as_bytes().to_vec().into_iter().chain(key.clone().encode().into().into_iter()).collect();
+        let res : Result<Vec<String>, DatabaseError>= connection.zrangebylex_limit(sorted_set_key, min, "+", 0, 1).map_err(|e| DatabaseError::Read(from(e)));
+        match res {
+            Ok(v) => {
+                if v.len() > 1 {
+                    panic!("Incorrect number of value returned")
+                } else if v.len() < 1 {
+                    Ok(None)
+                } else {
+                    let key_bytes = v[0].as_bytes();
+                    let redis_key = generate_redis_key_from_byte::<T>(key_bytes);
+                    let value: Option<Vec<u8>> = connection.get(redis_key).map_err(|e| DatabaseError::Read(from(e)))?;
+
+                    let key_value_pair:  Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, DatabaseErrorInfo> = match value {
+                        Some(v) =>Ok(Some((Cow::Owned(key_bytes.to_vec()), Cow::Owned(v)))),
+                        _ => Err(DatabaseError::Read(DatabaseErrorInfo{ message: "failed to get value".to_string(), code: 0 }))?
+                    };
+
+                    let decoded_res = decode::<T>(key_value_pair.clone());
+                    let decoded_res_copy = decode::<T>(key_value_pair);
+                    self.current_key = Some(decoded_res_copy.unwrap().unwrap().0);
+
+                    decoded_res
+                }
+            }
+            Err(e) => Err(e)
+        }
+    }
+
+    fn next(&mut self) -> PairResult<T> {
+        match self.current_key.clone() {
+            Some(key) => {
+                let sorted_set_key = generate_sorted_set_key::<T>();
+                let min: Vec<u8> = "(".as_bytes().to_vec().into_iter().chain(key.clone().encode().into().into_iter()).collect();
+                let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
+                let res : Result<Vec<String>, DatabaseError>= connection.zrangebylex_limit(sorted_set_key, min, "+", 0, 1).map_err(|e| DatabaseError::Read(from(e)));
+
+                match res {
+                    Ok(v) => {
+                        if v.len() > 1 {
+                            panic!("Incorrect number of value returned")
+                        } else if v.len() < 1 {
+                            Ok(None)
+                        } else {
+                            let key_bytes = v[0].as_bytes();
+                            let redis_key = generate_redis_key_from_byte::<T>(key_bytes);
+                            let value: Option<Vec<u8>> = connection.get(redis_key).map_err(|e| DatabaseError::Read(from(e)))?;
+
+                            let key_value_pair:  Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, DatabaseErrorInfo> = match value {
+                                Some(v) =>Ok(Some((Cow::Owned(key_bytes.to_vec()), Cow::Owned(v)))),
+                                _ => Err(DatabaseError::Read(DatabaseErrorInfo{ message: "failed to get value".to_string(), code: 0 }))?
+                            };
+
+                            let decoded_res = decode::<T>(key_value_pair.clone());
+                            let decoded_res_copy = decode::<T>(key_value_pair);
+                            self.current_key = Some(decoded_res_copy.unwrap().unwrap().0);
+
+                            decoded_res
+                        }
+                    }
+                    Err(e) => Err(e)
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn prev(&mut self) -> PairResult<T> {
+        match self.current_key.clone() {
+            Some(key) => {
+                let sorted_set_key = generate_sorted_set_key::<T>();
+                let max: Vec<u8> = "(".as_bytes().to_vec().into_iter().chain(key.clone().encode().into().into_iter()).collect();
+                let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
+                let res : Result<Vec<String>, DatabaseError>= connection.zrangebylex_limit(sorted_set_key, "-", max, 0, 1).map_err(|e| DatabaseError::Read(from(e)));
+
+                match res {
+                    Ok(v) => {
+                        if v.len() > 1 {
+                            panic!("Incorrect number of value returned")
+                        } else if v.len() < 1 {
+                            Ok(None)
+                        } else {
+                            let key_bytes = v[0].as_bytes();
+                            let redis_key = generate_redis_key_from_byte::<T>(key_bytes);
+                            let value: Option<Vec<u8>> = connection.get(redis_key).map_err(|e| DatabaseError::Read(from(e)))?;
+
+                            let key_value_pair:  Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, DatabaseErrorInfo> = match value {
+                                Some(v) =>Ok(Some((Cow::Owned(key_bytes.to_vec()), Cow::Owned(v)))),
+                                _ => Err(DatabaseError::Read(DatabaseErrorInfo{ message: "failed to get value".to_string(), code: 0 }))?
+                            };
+
+                            let decoded_res = decode::<T>(key_value_pair.clone());
+                            let decoded_res_copy = decode::<T>(key_value_pair);
+                            self.current_key = Some(decoded_res_copy.unwrap().unwrap().0);
+
+                            decoded_res
+                        }
+                    }
+                    Err(e) => Err(e)
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn last(&mut self) -> PairResult<T> {
+        let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
+        let sorted_set_key = generate_sorted_set_key::<T>();
+
+        let res : Result<Vec<String>, DatabaseError>= connection.zrevrangebylex_limit(sorted_set_key, "+", "-", 0, 1).map_err(|e| DatabaseError::Read(from(e)));
+        match res {
+            Ok(v) => {
+                if v.len() > 1 {
+                    panic!("Incorrect number of value returned")
+                } else if v.len() < 1 {
+                    Ok(None)
+                } else {
+                    let key_bytes = v[0].as_bytes();
+                    let redis_key = generate_redis_key_from_byte::<T>(key_bytes);
+                    let value: Option<Vec<u8>> = connection.get(redis_key).map_err(|e| DatabaseError::Read(from(e)))?;
+
+                    let key_value_pair:  Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, DatabaseErrorInfo> = match value {
+                        Some(v) =>Ok(Some((Cow::Owned(key_bytes.to_vec()), Cow::Owned(v)))),
+                        _ => Err(DatabaseError::Read(DatabaseErrorInfo{ message: "failed to get value".to_string(), code: 0 }))?
+                    };
+
+                    let decoded_res = decode::<T>(key_value_pair.clone());
+                    let decoded_res_copy = decode::<T>(key_value_pair);
+                    self.current_key = Some(decoded_res_copy.unwrap().unwrap().0);
+
+                    decoded_res
+                }
+            }
+            Err(e) => Err(e)
+        }
+    }
+
+    fn current(&mut self) -> PairResult<T> {
+        match self.current_key.clone() {
+            Some(key) => {
+                let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
+                let redis_key = generate_redis_key::<T>(&key);
+                let value: Option<Vec<u8>> = connection.get(redis_key).map_err(|e| DatabaseError::Read(from(e)))?;
+
+                let key_value_pair:  Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, DatabaseErrorInfo> = match value {
+                    Some(v) => {
+                        Ok(Some((Cow::Owned(self.current_key.clone().unwrap().encode().as_ref().to_vec()), Cow::Owned(v))))
+                    },
+                    _ => Err(DatabaseError::Read(DatabaseErrorInfo{ message: "failed to get value".to_string(), code: 0 }))?
+                };
+
+                let decoded_res = decode::<T>(key_value_pair.clone());
+                let decoded_res_copy = decode::<T>(key_value_pair);
+                self.current_key = Some(decoded_res_copy.unwrap().unwrap().0);
+
+                decoded_res
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn walk(&mut self, start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError> {
+        panic!("not supported")
+    }
+
+    fn walk_range(
+        &mut self,
+        range: impl RangeBounds<T::Key>,
+    ) -> Result<RangeWalker<'_, T, Self>, DatabaseError> {
+        panic!("not supported")
+    }
+
+    fn walk_back(
+        &mut self,
+        start_key: Option<T::Key>,
+    ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError> {
+        panic!("not supported")
+    }
+}
+
 impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T> {
@@ -280,12 +546,16 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     /// found, before calling `upsert`.
     fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key_copy = key.clone();
+        let set_key = key.clone();
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
 
         let redis_key = generate_redis_key::<T>(&key_copy);
         let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
-        let res: RedisResult<()> = connection.set(redis_key.clone(), value.unwrap_or(&self.buf));
+        let _: RedisResult<()> = connection.set(redis_key.clone(), value.unwrap_or(&self.buf));
+
+        let sorted_set_key = generate_sorted_set_key::<T>();
+        let redis_res: RedisResult<Value> = connection.zadd(sorted_set_key, set_key.encode().as_ref(), 0);
 
         self.execute_with_operation_metric(
             Operation::CursorUpsert,
@@ -307,8 +577,19 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     }
 
     fn insert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        let key_copy = key.clone();
+        let set_key = key.clone();
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
+
+        let redis_key = generate_redis_key::<T>(&key_copy);
+        let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
+        let stored_value: Option<Vec<u8>> = connection.get(redis_key).map_err(|e| DatabaseError::Read(from(e)))?;
+        if let Some(stored_value) = stored_value {
+            let sorted_set_key = generate_sorted_set_key::<T>();
+            let _: RedisResult<Value> = connection.zadd(sorted_set_key, set_key.encode().as_ref(), 0);
+        }
+
         self.execute_with_operation_metric(
             Operation::CursorInsert,
             Some(value.unwrap_or(&self.buf).len()),
@@ -331,7 +612,10 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     /// Appends the data to the end of the table. Consequently, the append operation
     /// will fail if the inserted key is less than the last table key
     fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        let key_copy = key.clone();
         let key = key.encode();
+
+        let redis_key = generate_redis_key::<T>(&key_copy);
         let value = compress_to_buf_or_ref!(self, value);
         self.execute_with_operation_metric(
             Operation::CursorAppend,
@@ -346,16 +630,23 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
                             table_name: T::NAME,
                             key: key.into(),
                         }
-                            .into()
+                            // .into()
                     })
             },
-        )
+        )?;
+
+        let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
+        let sorted_set_key = generate_sorted_set_key::<T>();
+        let res: RedisResult<()> = connection.zadd(sorted_set_key, redis_key, 0);
+        res.map_err(|e| DatabaseError::Open(from(e)))
     }
 
     fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.execute_with_operation_metric(Operation::CursorDeleteCurrent, None, |this| {
             this.inner.del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
         })
+
+        // TODO: We need to delete current as well
     }
 }
 
@@ -364,6 +655,15 @@ fn generate_redis_key<T: Table>(key: &T::Key) -> Vec<u8> {
     let encoded_key = key.clone().encode();
     let encoded_key= encoded_key.as_ref();
     [prefix.encode().as_slice(), encoded_key].concat()
+}
+
+fn generate_redis_key_from_byte<T: Table>(key: &[u8]) -> Vec<u8> {
+    let prefix = format!("{}:", T::NAME);
+    [prefix.encode().as_slice(), key].concat()
+}
+
+fn generate_sorted_set_key<T: Table>() -> String {
+   format!("sorted:{}",T::NAME)
 }
 
 impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {

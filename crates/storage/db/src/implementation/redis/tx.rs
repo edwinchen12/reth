@@ -222,12 +222,6 @@ impl<K: TransactionKind> Tx<K> {
     /// Generates a Redis key for the given table and key.
     /// TODO: optimize this function
     fn generate_redis_key<T: Table>(key: &T::Key) -> Vec<u8> {
-        // // let serialized_key: String = key.encode().to_string();
-        // let mut serialized_key = T::NAME.as_bytes().to_vec();
-        // serialized_key.push(b':');
-        // serialized_key.extend(key.clone().encode().into());
-        //
-        // String::from_utf8(serialized_key).unwrap()
         let prefix = format!("{}:", T::NAME);
         let encoded_key = key.clone().encode();
         let encoded_key= encoded_key.as_ref();
@@ -387,6 +381,7 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     }
 
     //TODO: do we need to empty the local cache?
+    //TODO: we might need to add the key to sorted set as well
     fn commit(self) -> Result<bool, DatabaseError> {
         self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
             let mut connection = this.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
