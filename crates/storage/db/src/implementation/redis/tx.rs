@@ -19,13 +19,17 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Pointer};
 use std::ops::Deref;
 use std::sync::RwLock;
-use redis::{Client, Commands, ErrorKind, Iter, Pipeline, RedisError, RedisResult};
+use redis::{Client, Commands, ErrorKind, Iter, Pipeline, RedisError, RedisResult, Value as RedisValue};
 use reth_db_api::table::{Decode, Key, Value};
 use reth_primitives::alloy_primitives::private::alloy_rlp::Encodable;
 
 /// Duration after which we emit the log about long-lived database transactions.
 const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 
+struct CachedValue {
+    value: Option<Vec<u8>>,
+    sorted_set_key: String,
+}
 /// Wrapper for the libmdbx transaction.
 // #[derive(Debug)]
 pub struct Tx<K: TransactionKind> {
@@ -46,10 +50,10 @@ pub struct Tx<K: TransactionKind> {
     pipeline: Arc<RwLock<Pipeline>>,
 
     /// redis data that has been changed in the transaction but not yet committed.
-    uncommitted_data: Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>,
+    uncommitted_data: Arc<RwLock<HashMap<Vec<u8>, CachedValue>>>,
 
     /// redis key that has been deleted in the transaction but not yet committed.
-    deleted_keys: Arc<RwLock<HashMap<Vec<u8>, ()>>>,
+    deleted_keys: Arc<RwLock<HashMap<Vec<u8>, CachedValue>>>,
 }
 
 #[inline]
@@ -90,8 +94,8 @@ impl<K: TransactionKind> Tx<K> {
         inner: Transaction<K>,
         redis: Arc<Client>,
         pipeline: Arc<RwLock<Pipeline>>,
-        uncommitted_data: Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>,
-        deleted_keys: Arc<RwLock<HashMap<Vec<u8>, ()>>>) -> Self {
+        uncommitted_data: Arc<RwLock<HashMap<Vec<u8>, CachedValue>>>,
+        deleted_keys: Arc<RwLock<HashMap<Vec<u8>, CachedValue>>>) -> Self {
         Self::new_inner(inner, redis, None, pipeline, uncommitted_data, deleted_keys)
     }
 
@@ -120,8 +124,8 @@ impl<K: TransactionKind> Tx<K> {
         redis: Arc<Client>,
         metrics_handler: Option<MetricsHandler<K>>,
         pipeline: Arc<RwLock<Pipeline>>,
-        uncommitted_data: Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>,
-        deleted_keys: Arc<RwLock<HashMap<Vec<u8>, ()>>>) -> Self {
+        uncommitted_data: Arc<RwLock<HashMap<Vec<u8>, CachedValue>>>,
+        deleted_keys: Arc<RwLock<HashMap<Vec<u8>, CachedValue>>>) -> Self {
         Self { inner, redis, metrics_handler, pipeline, uncommitted_data, deleted_keys }
     }
 
@@ -226,6 +230,15 @@ impl<K: TransactionKind> Tx<K> {
         let encoded_key = key.clone().encode();
         let encoded_key= encoded_key.as_ref();
         [prefix.encode().as_slice(), encoded_key].concat()
+    }
+
+    fn from_redis_key(key: Vec<u8>) -> Vec<u8> {
+        let table_key: String = String::from_utf8(key).unwrap().split(":").take(1).collect();
+        table_key.as_bytes().to_vec()
+    }
+
+    fn generate_sorted_set_key<T: Table>() -> String {
+        format!("sorted:{}",T::NAME)
     }
 
     fn clear_redis<T: Table>(&self) -> Result<(), DatabaseError> {
@@ -347,8 +360,8 @@ impl<K: TransactionKind> fmt::Debug for Tx<K> {
             .field("inner", &self.inner)
             .field("redis", &self.redis)
             .field("metrics_handler", &self.metrics_handler)
-            .field("uncommitted_data", &self.uncommitted_data)
-            .field("deleted_keys", &self.deleted_keys)
+            // .field("uncommitted_data", &self.uncommitted_data)
+            // .field("deleted_keys", &self.deleted_keys)
             .finish()
     }
 }
@@ -366,7 +379,7 @@ impl<K: TransactionKind> DbTx for Tx<K> {
             if self.deleted_keys.read().unwrap().contains_key(&redis_key) {
                 Ok(None)
             } else if let Some(value) = self.uncommitted_data.read().unwrap().get(&redis_key) {
-                Ok(Some(decode_one::<T>(Cow::Owned(value.to_vec()))?))
+                Ok(Some(decode_one::<T>(Cow::Owned(value.value.clone().unwrap().to_vec()))?))
             } else {
                 // TODO: review the isolation for this case, should we read from redis?
                 let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e)))?;
@@ -386,6 +399,14 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
             let mut connection = this.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
             this.pipeline.write().unwrap().execute(&mut connection);
+
+            for (key, val) in this.deleted_keys.read().unwrap().iter() {
+                let sorted_set_key = val.sorted_set_key.clone();
+                let _: RedisResult<RedisValue> = connection.zrem(sorted_set_key, Self::from_redis_key(key.clone()));
+            }
+            this.deleted_keys.write().unwrap().clear();
+            this.uncommitted_data.write().unwrap().clear();
+
             match this.inner.commit().map_err(|e| DatabaseError::Commit(e.into())) {
                 Ok((v, latency)) => (Ok(v), Some(latency)),
                 Err(e) => (Err(e), None),
@@ -435,11 +456,19 @@ impl DbTxMut for Tx<RW> {
     type DupCursorMut<T: DupSort> = Cursor<RW, T>;
 
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        let set_key = key.clone();
         let redis_key = Tx::<RW>::generate_redis_key::<T>(&key);
         let key = key.encode();
         let compressed_value = value.compress();
-        self.uncommitted_data.write().unwrap().insert(redis_key.clone(), compressed_value.as_ref().to_vec());
+        self.uncommitted_data.write().unwrap().insert(redis_key.clone(), CachedValue{
+            value: Some(compressed_value.as_ref().to_vec()),
+            sorted_set_key: Self::generate_sorted_set_key::<T>()
+        });
         self.pipeline.write().unwrap().set(redis_key.clone(), compressed_value.as_ref());
+
+        let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
+        let sorted_set_key = Tx::<RW>::generate_sorted_set_key::<T>();
+        let _: RedisResult<RedisValue> = connection.zadd(sorted_set_key, set_key.encode().as_ref(), 0);
 
         self.execute_with_operation_metric::<T, _>(
             Operation::Put,
@@ -470,7 +499,7 @@ impl DbTxMut for Tx<RW> {
             data = Some(value.as_ref());
         };
         let redis_key = Tx::<RW>::generate_redis_key::<T>(&key);
-        self.deleted_keys.write().unwrap().insert(redis_key.clone().to_ascii_lowercase(), ());
+        self.deleted_keys.write().unwrap().insert(redis_key.clone(), CachedValue{value: None, sorted_set_key: Self::generate_sorted_set_key::<T>()});
         self.pipeline.write().unwrap().del(redis_key.clone());
 
         self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {

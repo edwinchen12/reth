@@ -94,6 +94,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         redis: Arc<Client>,
         metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> Self {
+        // TODO cursor might need to be initialized with it pointing to the last element in the db.
         Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData, redis, current_key: None }
     }
 
@@ -555,7 +556,8 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
         let _: RedisResult<()> = connection.set(redis_key.clone(), value.unwrap_or(&self.buf));
 
         let sorted_set_key = generate_sorted_set_key::<T>();
-        let redis_res: RedisResult<Value> = connection.zadd(sorted_set_key, set_key.encode().as_ref(), 0);
+        let redis_res: RedisResult<Value> = connection.zadd(sorted_set_key, set_key.clone().encode().as_ref(), 0);
+        self.current_key = Some(set_key.clone());
 
         self.execute_with_operation_metric(
             Operation::CursorUpsert,
@@ -584,10 +586,12 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
 
         let redis_key = generate_redis_key::<T>(&key_copy);
         let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
-        let stored_value: Option<Vec<u8>> = connection.get(redis_key).map_err(|e| DatabaseError::Read(from(e)))?;
-        if let Some(stored_value) = stored_value {
+        let stored_value: Option<Vec<u8>> = connection.get(redis_key.clone()).map_err(|e| DatabaseError::Read(from(e)))?;
+        if let None = stored_value {
+            let _: RedisResult<()> = connection.set(redis_key.clone(), value.unwrap_or(&self.buf));
             let sorted_set_key = generate_sorted_set_key::<T>();
-            let _: RedisResult<Value> = connection.zadd(sorted_set_key, set_key.encode().as_ref(), 0);
+            let _: RedisResult<Value> = connection.zadd(sorted_set_key, set_key.clone().encode().as_ref(), 0);
+            self.current_key = Some(set_key.clone())
         }
 
         self.execute_with_operation_metric(
@@ -613,6 +617,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     /// will fail if the inserted key is less than the last table key
     fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let key_copy = key.clone();
+        let set_key = key.clone();
         let key = key.encode();
 
         let redis_key = generate_redis_key::<T>(&key_copy);
@@ -637,7 +642,8 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
 
         let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
         let sorted_set_key = generate_sorted_set_key::<T>();
-        let res: RedisResult<()> = connection.zadd(sorted_set_key, redis_key, 0);
+        let res: RedisResult<()> = connection.zadd(sorted_set_key, set_key.clone().encode().as_ref(), 0);
+        self.current_key = Some(set_key.clone());
         res.map_err(|e| DatabaseError::Open(from(e)))
     }
 
