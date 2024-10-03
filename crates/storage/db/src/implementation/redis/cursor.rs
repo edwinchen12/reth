@@ -648,11 +648,20 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     }
 
     fn delete_current(&mut self) -> Result<(), DatabaseError> {
+        if self.current_key != None {
+            let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
+            let sorted_set_key = generate_sorted_set_key::<T>();
+            let set_key = self.current_key.clone().unwrap();
+            let res: RedisResult<()> = connection.zrem(sorted_set_key, set_key.encode().as_ref());
+            let test = self.current_key.clone().unwrap();
+            let redis_key = generate_redis_key::<T>(&self.current_key.clone().unwrap());
+            let _: RedisResult<()> = connection.del(redis_key);
+            self.current_key = None;
+        }
+
         self.execute_with_operation_metric(Operation::CursorDeleteCurrent, None, |this| {
             this.inner.del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
         })
-
-        // TODO: We need to delete current as well
     }
 }
 
