@@ -9,26 +9,73 @@ use reth_db_api::{
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, trace, warn};
-use std::{backtrace::Backtrace, fmt, marker::PhantomData, string::String, sync::{
+use std::{backtrace::Backtrace, cmp, fmt, marker::PhantomData, string::String, sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 }, time::{Duration, Instant}};
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::{Debug, Pointer};
 use std::ops::Deref;
 use std::sync::RwLock;
 use redis::{Client, Commands, ErrorKind, Iter, Pipeline, RedisError, RedisResult, Value as RedisValue};
 use reth_db_api::table::{Decode, Key, Value};
 use reth_primitives::alloy_primitives::private::alloy_rlp::Encodable;
+use std::cmp::Ordering as CmpOrdering;
 
 /// Duration after which we emit the log about long-lived database transactions.
 const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 
 struct CachedValue {
-    value: Option<Vec<u8>>,
     sorted_set_key: String,
+    dup_set_key: Option<Vec<u8>>,
+    value: Option<Vec<u8>>,
+}
+
+unsafe fn memcmp(s1: &[u8], s2: &[u8], n: usize) -> i32 {
+    for i in 0..n {
+        let a = *s1.get_unchecked(i);
+        let b = *s2.get_unchecked(i);
+        if a != b {
+            return (a as i32).saturating_sub(b as i32);
+        };
+    }
+
+    0
+}
+impl Eq for CachedValue {}
+
+impl PartialEq<Self> for CachedValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl PartialOrd<Self> for CachedValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for CachedValue {
+    fn cmp(&self, other: &Self) -> CmpOrdering {
+        let min_length = cmp::min(self.value.clone().unwrap().len(), other.value.clone().unwrap().len());
+        let res = unsafe { memcmp(&self.value.clone().unwrap()[..], &other.value.clone().unwrap()[..], min_length) };
+        if res > 0 {
+            CmpOrdering::Greater
+        } else if res < 0 {
+            CmpOrdering::Less
+        } else {
+            if self.value.clone().unwrap().len() > other.value.clone().unwrap().len() {
+                CmpOrdering::Greater
+            } else if self.value.clone().unwrap().len() < other.value.clone().unwrap().len() {
+                CmpOrdering::Less
+            } else {
+                CmpOrdering::Equal
+            }
+        }
+    }
 }
 /// Wrapper for the libmdbx transaction.
 // #[derive(Debug)]
@@ -54,6 +101,12 @@ pub struct Tx<K: TransactionKind> {
 
     /// redis key that has been deleted in the transaction but not yet committed.
     deleted_keys: Arc<RwLock<HashMap<Vec<u8>, CachedValue>>>,
+
+    // redis data with duplication that has been changed in the transaction but not yet commited.
+    uncommited_data_dup: Arc<RwLock<HashMap<Vec<u8>, BTreeSet<CachedValue>>>>,
+
+    // redis data with duplication that has been deleted in the transaction.
+    deleted_data_dup: Arc<RwLock<HashMap<Vec<u8>, BTreeSet<CachedValue>>>>
 }
 
 #[inline]
@@ -95,8 +148,11 @@ impl<K: TransactionKind> Tx<K> {
         redis: Arc<Client>,
         pipeline: Arc<RwLock<Pipeline>>,
         uncommitted_data: Arc<RwLock<HashMap<Vec<u8>, CachedValue>>>,
-        deleted_keys: Arc<RwLock<HashMap<Vec<u8>, CachedValue>>>) -> Self {
-        Self::new_inner(inner, redis, None, pipeline, uncommitted_data, deleted_keys)
+        deleted_keys: Arc<RwLock<HashMap<Vec<u8>, CachedValue>>>,
+        uncommited_data_dup: Arc<RwLock<HashMap<Vec<u8>, BTreeSet<CachedValue>>>>,
+        deleted_data_dup: Arc<RwLock<HashMap<Vec<u8>, BTreeSet<CachedValue>>>>
+    ) -> Self {
+        Self::new_inner(inner, redis, None, pipeline, uncommitted_data, deleted_keys, uncommited_data_dup, deleted_data_dup)
     }
 
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
@@ -115,7 +171,7 @@ impl<K: TransactionKind> Tx<K> {
                 Ok(handler)
             })
             .transpose()?;
-        Ok(Self::new_inner(inner, redis, metrics_handler, Arc::new(RwLock::new(Pipeline::new())), Arc::new(RwLock::new(HashMap::new())), Arc::new(RwLock::new(HashMap::new()))))
+        Ok(Self::new_inner(inner, redis, metrics_handler, Arc::new(RwLock::new(Pipeline::new())), Arc::new(RwLock::new(HashMap::new())), Arc::new(RwLock::new(HashMap::new())), Arc::new(RwLock::new(HashMap::new())), Arc::new(RwLock::new(HashMap::new()))))
     }
 
     #[inline]
@@ -125,8 +181,11 @@ impl<K: TransactionKind> Tx<K> {
         metrics_handler: Option<MetricsHandler<K>>,
         pipeline: Arc<RwLock<Pipeline>>,
         uncommitted_data: Arc<RwLock<HashMap<Vec<u8>, CachedValue>>>,
-        deleted_keys: Arc<RwLock<HashMap<Vec<u8>, CachedValue>>>) -> Self {
-        Self { inner, redis, metrics_handler, pipeline, uncommitted_data, deleted_keys }
+        deleted_keys: Arc<RwLock<HashMap<Vec<u8>, CachedValue>>>,
+        uncommited_data_dup: Arc<RwLock<HashMap<Vec<u8>, BTreeSet<CachedValue>>>>,
+        deleted_data_dup: Arc<RwLock<HashMap<Vec<u8>, BTreeSet<CachedValue>>>>
+    ) -> Self {
+        Self { inner, redis, metrics_handler, pipeline, uncommitted_data, deleted_keys, uncommited_data_dup, deleted_data_dup }
     }
 
     /// Gets this transaction ID.
@@ -239,6 +298,13 @@ impl<K: TransactionKind> Tx<K> {
 
     fn generate_sorted_set_key<T: Table>() -> String {
         format!("sorted:{}",T::NAME)
+    }
+
+    fn generate_dup_set_key<T: Table>(key: &T::Key) -> Vec<u8> {
+        let prefix = format!("{}:", T::NAME);
+        let encoded_key = key.clone().encode();
+        let encoded_key= encoded_key.as_ref();
+        [prefix.encode().as_slice(), encoded_key].concat()
     }
 
     fn clear_redis<T: Table>(&self) -> Result<(), DatabaseError> {
@@ -404,8 +470,25 @@ impl<K: TransactionKind> DbTx for Tx<K> {
                 let sorted_set_key = val.sorted_set_key.clone();
                 let _: RedisResult<RedisValue> = connection.zrem(sorted_set_key, Self::from_redis_key(key.clone()));
             }
+
+            for (key, set) in this.uncommited_data_dup.read().unwrap().iter() {
+                let mut sorted_set_key: String = String::new();
+                for (val) in set.iter() {
+                    let dup_set_key = val.dup_set_key.clone();
+                    let _: RedisResult<RedisValue> = connection.zrem(dup_set_key, val.value.clone().unwrap());
+
+                    sorted_set_key = val.sorted_set_key.clone();
+                }
+
+                if !sorted_set_key.is_empty() {
+                    let _: RedisResult<RedisValue> = connection.zrem(sorted_set_key, Self::from_redis_key(key.clone()));
+                }
+            }
+
             this.deleted_keys.write().unwrap().clear();
             this.uncommitted_data.write().unwrap().clear();
+            this.deleted_data_dup.write().unwrap().clear();
+            this.uncommited_data_dup.write().unwrap().clear();
 
             match this.inner.commit().map_err(|e| DatabaseError::Commit(e.into())) {
                 Ok((v, latency)) => (Ok(v), Some(latency)),
@@ -457,14 +540,27 @@ impl DbTxMut for Tx<RW> {
 
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         let set_key = key.clone();
+
         let redis_key = Tx::<RW>::generate_redis_key::<T>(&key);
         let key = key.encode();
         let compressed_value = value.compress();
-        self.uncommitted_data.write().unwrap().insert(redis_key.clone(), CachedValue{
-            value: Some(compressed_value.as_ref().to_vec()),
-            sorted_set_key: Self::generate_sorted_set_key::<T>()
-        });
-        self.pipeline.write().unwrap().set(redis_key.clone(), compressed_value.as_ref());
+
+        if T::is_dup_sort() {
+            let dup_set_key = Self::generate_dup_set_key::<T>(&set_key);
+            self.uncommited_data_dup.write().unwrap().entry(redis_key.clone()).or_insert(BTreeSet::new()).insert(CachedValue{
+                value: Some(compressed_value.as_ref().to_vec()),
+                sorted_set_key: Self::generate_sorted_set_key::<T>(),
+                dup_set_key: Some(dup_set_key.clone())
+            });
+            self.pipeline.write().unwrap().zadd(dup_set_key, compressed_value.as_ref().to_vec(), 0);
+        } else {
+            self.uncommitted_data.write().unwrap().insert(redis_key.clone(), CachedValue{
+                value: Some(compressed_value.as_ref().to_vec()),
+                sorted_set_key: Self::generate_sorted_set_key::<T>(),
+                dup_set_key: None
+            });
+            self.pipeline.write().unwrap().set(redis_key.clone(), compressed_value.as_ref());
+        }
 
         let mut connection = self.redis.get_connection().map_err(|e| DatabaseError::Open(from(e))).unwrap();
         let sorted_set_key = Tx::<RW>::generate_sorted_set_key::<T>();
@@ -493,17 +589,28 @@ impl DbTxMut for Tx<RW> {
         value: Option<T::Value>,
     ) -> Result<bool, DatabaseError> {
         let mut data = None;
-
+        let set_key = key.clone();
         let value = value.map(Compress::compress);
         if let Some(value) = &value {
             data = Some(value.as_ref());
         };
         let redis_key = Tx::<RW>::generate_redis_key::<T>(&key);
-        self.deleted_keys.write().unwrap().insert(redis_key.clone(), CachedValue{value: None, sorted_set_key: Self::generate_sorted_set_key::<T>()});
-        self.pipeline.write().unwrap().del(redis_key.clone());
+        let key = key.encode();
+
+        if T::is_dup_sort() {
+            let dup_set = self.deleted_data_dup.read().unwrap().get(&redis_key.clone());
+            let _ = dup_set.unwrap().remove(&CachedValue{
+                value: Some(value.unwrap().as_ref().clone().to_vec()),
+                sorted_set_key: Self::generate_sorted_set_key::<T>(),
+                dup_set_key: Some(Self::generate_dup_set_key::<T>(&set_key))
+            });
+        } else {
+            self.deleted_keys.write().unwrap().insert(redis_key.clone(), CachedValue{value: None, sorted_set_key: Self::generate_sorted_set_key::<T>(), dup_set_key: None});
+            self.pipeline.write().unwrap().del(redis_key.clone());
+        }
 
         self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
-            let key = key.encode();
+            let key = key;
             tx.del(self.get_dbi::<T>()?, key.as_ref(), data)
                 .map_err(|e| DatabaseError::Delete(e.into()))
         })
