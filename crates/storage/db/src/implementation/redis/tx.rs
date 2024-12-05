@@ -601,12 +601,14 @@ impl DbTxMut for Tx<RW> {
             let mut dup_set_write = self.deleted_data_dup.write().unwrap();
             let dup_set_option = dup_set_write.get_mut(&redis_key.clone());
             let  dup_set = dup_set_option.unwrap();
-
-            let _ = dup_set.remove(&CachedValue{
+            let cached_value = CachedValue{
                 value: Some(data.unwrap().clone().to_vec()),
                 sorted_set_key: Self::generate_sorted_set_key::<T>(),
                 dup_set_key: Some(Self::generate_dup_set_key::<T>(&set_key))
-            });
+            };
+
+            let _ = dup_set.remove(&cached_value);
+            self.pipeline.write().unwrap().zrem(cached_value.dup_set_key, cached_value.value);
         } else {
             self.deleted_keys.write().unwrap().insert(redis_key.clone(), CachedValue{value: None, sorted_set_key: Self::generate_sorted_set_key::<T>(), dup_set_key: None});
             self.pipeline.write().unwrap().del(redis_key.clone());
