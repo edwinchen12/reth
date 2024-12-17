@@ -120,7 +120,7 @@ impl DatabaseEnvMetrics {
     }
 
     /// Record metrics for closing a database transactions.
-    #[cfg(feature = "mdbx")]
+    #[cfg(any(feature = "mdbx", feature = "redis"))]
     pub(crate) fn record_closed_transaction(
         &self,
         mode: TransactionMode,
@@ -302,7 +302,7 @@ pub(crate) struct TransactionOutcomeMetrics {
 impl TransactionOutcomeMetrics {
     /// Record transaction closing with the duration it was open and the duration it took to close
     /// it.
-    #[cfg(feature = "mdbx")]
+    #[cfg(any(feature = "mdbx", feature= "redis"))]
     pub(crate) fn record(
         &self,
         open_duration: Duration,

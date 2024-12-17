@@ -16,7 +16,6 @@ pub mod codecs;
 mod raw;
 pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 
-#[cfg(feature = "mdbx")]
 pub(crate) mod utils;
 
 use alloy_consensus::Header;
@@ -153,11 +152,19 @@ macro_rules! tables {
 
                 type Key = $key;
                 type Value = $value;
+
+                fn is_dup_sort() -> bool {
+                        return false
+                }
             }
 
             $(
                 impl DupSort for $name {
                     type SubKey = $subkey;
+
+                    fn is_dup_sort() -> bool {
+                        return true
+                    }
                 }
             )?
         )*

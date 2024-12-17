@@ -98,6 +98,8 @@ pub trait Table: Send + Sync + Debug + 'static {
 
     /// Value element of `Table`.
     type Value: Value;
+
+    fn is_dup_sort() -> bool;
 }
 
 /// Trait that provides object-safe access to the table's metadata.
@@ -122,6 +124,8 @@ pub trait DupSort: Table {
     ///
     /// Upstream docs: <https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48>
     type SubKey: Key;
+
+    fn is_dup_sort() -> bool;
 }
 
 /// Allows duplicating tables across databases

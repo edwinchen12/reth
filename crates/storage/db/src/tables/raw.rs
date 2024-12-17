@@ -18,6 +18,10 @@ impl<T: Table> Table for RawTable<T> {
 
     type Key = RawKey<T::Key>;
     type Value = RawValue<T::Value>;
+
+    fn is_dup_sort() -> bool {
+        return false
+    }
 }
 
 /// Raw `DupSort` table that can be used to access any table and its data in raw mode.
@@ -33,10 +37,18 @@ impl<T: DupSort> Table for RawDupSort<T> {
 
     type Key = RawKey<T::Key>;
     type Value = RawValue<T::Value>;
+
+    fn is_dup_sort() -> bool {
+        return true
+    }
 }
 
 impl<T: DupSort> DupSort for RawDupSort<T> {
     type SubKey = RawKey<T::SubKey>;
+
+    fn is_dup_sort() -> bool {
+        return true
+    }
 }
 
 /// Raw table key.

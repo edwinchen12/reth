@@ -55,6 +55,17 @@ parking_lot = { workspace = true, optional = true }
 # arbitrary utils
 strum = { workspace = true, features = ["derive"], optional = true }
 
+# redis-rs
+redis = { version = "0.25" }
+lazy_static = "1.5.0"
+#r2d2_redis = { version = "0.15" }
+#TODO: move to dev-dependencies
+testcontainers = {  version = "0.20.1", features = ["blocking"] }
+testcontainers-modules = { version = "0.8.0", features = ["redis"] }
+
+tokio-postgres = { version = "0.7.2" }
+tokio = { version = "1.0", features = ["full"] }
+
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
@@ -79,7 +90,7 @@ paste.workspace = true
 assert_matches.workspace = true
 
 [features]
-default = ["mdbx"]
+default = ["redis"]
 mdbx = [
     "dep:reth-libmdbx",
     "dep:eyre",
@@ -113,6 +124,13 @@ arbitrary = [
     "alloy-consensus/arbitrary",
 ]
 optimism = ["reth-primitives/optimism", "reth-db-api/optimism"]
+redis = ["dep:reth-libmdbx",
+    "dep:eyre",
+    "dep:page_size",
+    "reth-metrics",
+    "dep:metrics",
+    "dep:strum",
+    "dep:rustc-hash",]
 disable-lock = []
 
 [[bench]]
