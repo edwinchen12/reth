@@ -79,6 +79,7 @@ pub mod test_utils {
 
     /// A database will delete the db dir when dropped.
     pub struct TempDatabase<DB> {
+        redis: ContainerAsync<Redis>,
         db: Option<DB>,
         path: PathBuf,
         /// Executed right before a database transaction is created.
@@ -104,8 +105,9 @@ pub mod test_utils {
 
     impl<DB> TempDatabase<DB> {
         /// Create new [`TempDatabase`] instance.
-        pub fn new(db: DB, path: PathBuf) -> Self {
+        pub fn new(redis: ContainerAsync<Redis>, db: DB, path: PathBuf) -> Self {
             Self {
+                redis,
                 db: Some(db),
                 path,
                 pre_tx_hook: RwLock::new(Box::new(|| ())),
@@ -207,7 +209,7 @@ pub mod test_utils {
         )
         .expect(&emsg);
 
-        Arc::new(TempDatabase::new(db, path))
+        Arc::new(TempDatabase::new(container, db, path))
     }
 
     /// Create read/write database for testing
@@ -223,7 +225,7 @@ pub mod test_utils {
                 .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
         )
         .expect(ERROR_DB_CREATION);
-        Arc::new(TempDatabase::new(db, path))
+        Arc::new(TempDatabase::new(container, db, path))
     }
 
     /// Create read only database for testing
@@ -239,7 +241,7 @@ pub mod test_utils {
             init_db(&redis_url, path.as_path(), args.clone()).expect(ERROR_DB_CREATION);
         }
         let db = open_db_read_only(&redis_url, path.as_path(), args).expect(ERROR_DB_OPEN);
-        Arc::new(TempDatabase::new(db, path))
+        Arc::new(TempDatabase::new(container, db, path))
     }
 }
 

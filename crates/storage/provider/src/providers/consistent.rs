@@ -1547,11 +1547,11 @@ mod tests {
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
     }
 
-    #[test]
-    fn test_block_reader_find_block_by_hash() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_reader_find_block_by_hash() -> eyre::Result<()> {
         // Initialize random number generator and provider factory
         let mut rng = generators::rng();
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
 
         // Generate 10 random blocks and split into database and in-memory blocks
         let blocks = random_block_range(
@@ -1658,11 +1658,11 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_block_reader_block() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_reader_block() -> eyre::Result<()> {
         // Initialize random number generator and provider factory
         let mut rng = generators::rng();
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
 
         // Generate 10 random blocks and split into database and in-memory blocks
         let blocks = random_block_range(
@@ -1739,8 +1739,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_changeset_reader() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_changeset_reader() -> eyre::Result<()> {
         let mut rng = generators::rng();
 
         let (database_blocks, in_memory_blocks) =
@@ -1769,7 +1769,7 @@ mod tests {
             0..0,
         );
 
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
 
         let provider_rw = factory.provider_rw()?;
         provider_rw.append_blocks_with_state(

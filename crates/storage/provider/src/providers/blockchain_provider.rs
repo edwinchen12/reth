@@ -868,7 +868,7 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity, clippy::too_many_arguments)]
-    fn provider_with_chain_spec_and_random_blocks(
+    async fn provider_with_chain_spec_and_random_blocks(
         rng: &mut impl Rng,
         chain_spec: Arc<ChainSpec>,
         database_blocks: usize,
@@ -896,7 +896,7 @@ mod tests {
             .map(|tx| tx.map(|tx| random_receipt(rng, tx, Some(2))).collect())
             .collect();
 
-        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec).await;
         let provider_rw = factory.database_provider_rw()?;
         let static_file_provider = factory.static_file_provider();
 
@@ -971,7 +971,7 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
-    fn provider_with_random_blocks(
+    async fn provider_with_random_blocks(
         rng: &mut impl Rng,
         database_blocks: usize,
         in_memory_blocks: usize,
@@ -988,7 +988,7 @@ mod tests {
             database_blocks,
             in_memory_blocks,
             block_range_params,
-        )
+        ).await
     }
 
     /// This will persist the last block in-memory and delete it from
@@ -1026,11 +1026,11 @@ mod tests {
         }));
     }
 
-    #[test]
-    fn test_block_reader_find_block_by_hash() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_reader_find_block_by_hash() -> eyre::Result<()> {
         // Initialize random number generator and provider factory
         let mut rng = generators::rng();
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
 
         // Generate 10 random blocks and split into database and in-memory blocks
         let blocks = random_block_range(
@@ -1124,11 +1124,11 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_block_reader_block() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_reader_block() -> eyre::Result<()> {
         // Initialize random number generator and provider factory
         let mut rng = generators::rng();
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
 
         // Generate 10 random blocks and split into database and in-memory blocks
         let blocks = random_block_range(
@@ -1196,15 +1196,15 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_block_reader_pending_block() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_reader_pending_block() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, _, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams::default(),
-        )?;
+        ).await?;
 
         // Generate a random block
         let mut rng = generators::rng();
@@ -1239,8 +1239,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_block_reader_ommers() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_reader_ommers() -> eyre::Result<()> {
         // Create a new provider
         let mut rng = generators::rng();
         let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
@@ -1248,7 +1248,7 @@ mod tests {
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams::default(),
-        )?;
+        ).await?;
 
         let first_in_mem_block = in_memory_blocks.first().unwrap();
 
@@ -1276,8 +1276,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_block_body_indices() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_body_indices() -> eyre::Result<()> {
         // Create a new provider
         let mut rng = generators::rng();
         let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
@@ -1288,7 +1288,7 @@ mod tests {
                 tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
                 ..Default::default()
             },
-        )?;
+        ).await?;
 
         let first_in_mem_block = in_memory_blocks.first().unwrap();
 
@@ -1330,15 +1330,15 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_block_hash_reader() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_hash_reader() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams::default(),
-        )?;
+        ).await?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -1358,15 +1358,15 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_header_provider() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_header_provider() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams::default(),
-        )?;
+        ).await?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -1400,7 +1400,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_canon_state_subscriptions() -> eyre::Result<()> {
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
 
         // Generate a random block to initialise the blockchain provider.
         let mut test_block_builder = TestBlockBuilder::default();
@@ -1442,8 +1442,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_withdrawals_provider() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_withdrawals_provider() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
         let (provider, database_blocks, in_memory_blocks, _) =
@@ -1453,7 +1453,7 @@ mod tests {
                 TEST_BLOCKS_COUNT,
                 TEST_BLOCKS_COUNT,
                 BlockRangeParams { withdrawals_count: Some(1..3), ..Default::default() },
-            )?;
+            ).await?;
         let blocks = [database_blocks, in_memory_blocks].concat();
 
         let shainghai_timestamp =
@@ -1495,15 +1495,15 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_block_num_reader() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_num_reader() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams::default(),
-        )?;
+        ).await?;
 
         assert_eq!(provider.best_block_number()?, in_memory_blocks.last().unwrap().number);
         assert_eq!(provider.last_block_number()?, database_blocks.last().unwrap().number);
@@ -1516,15 +1516,15 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_block_reader_id_ext_block_by_id() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_reader_id_ext_block_by_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams::default(),
-        )?;
+        ).await?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -1552,15 +1552,15 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_block_reader_id_ext_header_by_number_or_tag() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_reader_id_ext_header_by_number_or_tag() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams::default(),
-        )?;
+        ).await?;
 
         let database_block = database_blocks.first().unwrap().clone();
 
@@ -1609,15 +1609,15 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_block_reader_id_ext_header_by_id() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_reader_id_ext_header_by_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams::default(),
-        )?;
+        ).await?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -1667,15 +1667,15 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_block_reader_id_ext_ommers_by_id() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_reader_id_ext_ommers_by_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams::default(),
-        )?;
+        ).await?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -1707,15 +1707,15 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_receipt_provider_id_ext_receipts_by_block_id() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_receipt_provider_id_ext_receipts_by_block_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams { tx_count: 1..3, ..Default::default() },
-        )?;
+        ).await?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -1753,15 +1753,15 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_receipt_provider_id_ext_receipts_by_block_number_or_tag() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_receipt_provider_id_ext_receipts_by_block_number_or_tag() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams { tx_count: 1..3, ..Default::default() },
-        )?;
+        ).await?;
 
         let database_block = database_blocks.first().unwrap().clone();
 
@@ -1796,8 +1796,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_changeset_reader() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_changeset_reader() -> eyre::Result<()> {
         let mut rng = generators::rng();
 
         let (database_blocks, in_memory_blocks) =
@@ -1826,7 +1826,7 @@ mod tests {
             0..0,
         );
 
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
 
         let provider_rw = factory.provider_rw()?;
         provider_rw.append_blocks_with_state(
@@ -1912,8 +1912,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_state_provider_factory() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_state_provider_factory() -> eyre::Result<()> {
         let mut rng = generators::rng();
 
         // test in-memory state use-cases
@@ -1922,7 +1922,7 @@ mod tests {
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams::default(),
-        )?;
+        ).await?;
 
         // test database state use-cases
         let (only_database_provider, database_blocks, _, _) = provider_with_random_blocks(
@@ -1930,7 +1930,7 @@ mod tests {
             TEST_BLOCKS_COUNT,
             0,
             BlockRangeParams::default(),
-        )?;
+        ).await?;
 
         let blocks = [database_blocks.clone(), in_memory_blocks.clone()].concat();
         let first_in_memory_block = in_memory_blocks.first().unwrap();
@@ -2078,15 +2078,15 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_canon_state_tracker() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_canon_state_tracker() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, _, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams::default(),
-        )?;
+        ).await?;
 
         let before = Instant::now();
         provider.on_forkchoice_update_received(&Default::default());
@@ -2107,8 +2107,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_block_id_reader() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_block_id_reader() -> eyre::Result<()> {
         // Create a new provider
         let mut rng = generators::rng();
         let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
@@ -2116,7 +2116,7 @@ mod tests {
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
             BlockRangeParams::default(),
-        )?;
+        ).await?;
 
         // Set the pending block in memory
         let pending_block = in_memory_blocks.last().unwrap();
@@ -2173,7 +2173,7 @@ mod tests {
                     tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
                     ..Default::default()
                 },
-            )?;
+            ).await?;
 
             $(
                 // Since data moves for each tried method, need to recalculate everything
@@ -2252,8 +2252,8 @@ mod tests {
         }};
     }
 
-    #[test]
-    fn test_methods_by_tx_range() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_methods_by_tx_range() -> eyre::Result<()> {
         test_by_tx_range!([
             (senders_by_tx_range, |block: &SealedBlock, _: &Vec<Vec<Receipt>>| block
                 .senders()
@@ -2285,7 +2285,7 @@ mod tests {
                     tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
                     ..Default::default()
                 },
-            )?;
+            ).await?;
 
             $(
                 // Since data moves for each tried method, need to recalculate everything
@@ -2343,8 +2343,8 @@ mod tests {
         }};
     }
 
-    #[test]
-    fn test_methods_by_block_range() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_methods_by_block_range() -> eyre::Result<()> {
         // todo(joshie) add canonical_hashes_range below after changing its interface into range
         // instead start end
         test_by_block_range!([
@@ -2410,7 +2410,7 @@ mod tests {
                 tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
                 ..Default::default()
             },
-        )?;
+        ).await?;
 
         let mut in_memory_blocks: std::collections::VecDeque<_> = in_memory_blocks.into();
 
@@ -2465,8 +2465,8 @@ mod tests {
     }};
 }
 
-    #[test]
-    fn test_non_range_methods() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_non_range_methods() -> eyre::Result<()> {
         let test_tx_index = 0;
 
         test_non_range!([
@@ -2707,8 +2707,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_race() -> eyre::Result<()> {
+    #[tokio::test]
+    async fn test_race() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
@@ -2718,7 +2718,7 @@ mod tests {
                 tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
                 ..Default::default()
             },
-        )?;
+        ).await?;
 
         // Old implementation was querying the database first. This is problematic, if there are
         // changes AFTER the database transaction is created.

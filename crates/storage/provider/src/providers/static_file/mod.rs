@@ -81,14 +81,14 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_snap() {
+    #[tokio::test]
+    async fn test_snap() {
         // Ranges
         let row_count = 100u64;
         let range = 0..=(row_count - 1);
 
         // Data sources
-        let factory = create_test_provider_factory();
+        let factory = create_test_provider_factory().await;
         let static_files_path = tempfile::tempdir().unwrap();
         let static_file = static_files_path.path().join(
             StaticFileSegment::Headers

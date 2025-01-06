@@ -37,16 +37,16 @@ pub type MockNodeTypesWithDB<DB = TempDatabase<DatabaseEnv>> =
     NodeTypesWithDBAdapter<MockNodeTypes, Arc<DB>>;
 
 /// Creates test provider factory with mainnet chain spec.
-pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
-    create_test_provider_factory_with_chain_spec(MAINNET.clone())
+pub async fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
+    create_test_provider_factory_with_chain_spec(MAINNET.clone()).await
 }
 
 /// Creates test provider factory with provided chain spec.
-pub fn create_test_provider_factory_with_chain_spec(
+pub async fn create_test_provider_factory_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
 ) -> ProviderFactory<MockNodeTypesWithDB> {
     let (static_dir, _) = create_test_static_files_dir();
-    let db = create_test_rw_db();
+    let db = create_test_rw_db().await;
     ProviderFactory::new(
         db,
         chain_spec,
