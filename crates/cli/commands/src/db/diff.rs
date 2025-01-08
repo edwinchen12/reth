@@ -17,6 +17,7 @@ use std::{
     sync::Arc,
 };
 use tracing::{info, warn};
+use crate::common::REDIS_URL;
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db diff` command
@@ -59,7 +60,7 @@ impl Command {
         warn!("Make sure the node is not running when running `reth db diff`!");
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
-        let second_db = open_db_read_only(&second_db_path, self.second_db.database_args())?;
+        let second_db = open_db_read_only(&REDIS_URL.to_string(), &second_db_path, self.second_db.database_args())?;
 
         let tables = match &self.table {
             Some(table) => std::slice::from_ref(table),

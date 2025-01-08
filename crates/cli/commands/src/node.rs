@@ -17,6 +17,7 @@ use reth_node_core::{
     version,
 };
 use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
+use crate::common::REDIS_URL;
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -183,7 +184,7 @@ impl<
         let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics());
+        let database = Arc::new(init_db(&REDIS_URL.to_string(), db_path.clone(), self.db.database_args())?.with_metrics());
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();

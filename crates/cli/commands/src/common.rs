@@ -26,6 +26,8 @@ use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
+//TODO: read from config
+pub const REDIS_URL: &str = "redis://localhost:6379";
 /// Struct to hold config and datadir paths
 #[derive(Debug, Parser)]
 pub struct EnvironmentArgs<C: ChainSpecParser> {
@@ -64,8 +66,6 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
-        //TODO: read from config
-        let redis_url = "redis://localhost:6379".to_string();
 
         if access.is_read_write() {
             reth_fs_util::create_dir_all(&db_path)?;
@@ -88,11 +88,11 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
         let (db, sfp) = match access {
             AccessRights::RW => (
-                Arc::new(init_db(redis_url, db_path, self.db.database_args())?),
+                Arc::new(init_db(&REDIS_URL.to_string(), db_path, self.db.database_args())?),
                 StaticFileProvider::read_write(sf_path)?,
             ),
             AccessRights::RO => (
-                Arc::new(open_db_read_only(redis_url, &db_path, self.db.database_args())?),
+                Arc::new(open_db_read_only(&REDIS_URL.to_string(), &db_path, self.db.database_args())?),
                 StaticFileProvider::read_only(sf_path, false)?,
             ),
         };

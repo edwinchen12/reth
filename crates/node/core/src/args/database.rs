@@ -35,7 +35,7 @@ pub struct DatabaseArgs {
 
 impl DatabaseArgs {
     /// Returns default database arguments with configured log level and client version.
-    pub fn database_args(&self) -> reth_db::mdbx::DatabaseArguments {
+    pub fn database_args(&self) -> reth_db::redis::DatabaseArguments {
         self.get_database_args(default_client_version())
     }
 
@@ -44,14 +44,14 @@ impl DatabaseArgs {
     pub fn get_database_args(
         &self,
         client_version: ClientVersion,
-    ) -> reth_db::mdbx::DatabaseArguments {
+    ) -> reth_db::redis::DatabaseArguments {
         let max_read_transaction_duration = match self.read_transaction_timeout {
             None => None, // if not specified, use default value
             Some(0) => Some(MaxReadTransactionDuration::Unbounded), // if 0, disable timeout
             Some(secs) => Some(MaxReadTransactionDuration::Set(Duration::from_secs(secs))),
         };
 
-        reth_db::mdbx::DatabaseArguments::new(client_version)
+        reth_db::redis::DatabaseArguments::new(client_version)
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
             .with_max_read_transaction_duration(max_read_transaction_duration)
